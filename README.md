@@ -14,7 +14,7 @@ AstrBot 大型群聊职场生存模拟插件。以「上班族的现实」为主
 
 ## 🚀 安装方式：WebUI 插件市场
 
-AstrBot WebUI → 插件管理 → 搜索 `astrbot_plugin_neteasemusic` → 安装。
+AstrBot WebUI → 插件管理 → 搜索 `astrbot_plugin_shangbanzu` → 安装。
 
 ### 卡片渲染环境安装教程（可选，不影响文字回复）
 
