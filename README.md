@@ -12,11 +12,9 @@ AstrBot 大型群聊职场生存模拟插件。以「上班族的现实」为主
 - 🌐 独立端口 **WebUI** 面板（**aiohttp** 实现，支持密码登录）
 - 🔌 适配 **OneBot v11** 与 **QQ 官方机器人**（仅用文本/图片/@ 组件）
 
-## 安装
+## 🚀 安装方式：WebUI 插件市场
 
-放入 `AstrBot/data/plugins/astrbot_plugin_shangbanzu/` 后在 WebUI 重载即可。
-
-依赖随 `requirements.txt` 自动安装（playwright / aiohttp / jinja2）。
+AstrBot WebUI → 插件管理 → 搜索 `astrbot_plugin_neteasemusic` → 安装。
 
 ### 卡片渲染环境安装教程（可选，不影响文字回复）
 
