@@ -1,0 +1,209 @@
+{
+  "use_image": {
+    "description": "启用 HTML 图片渲染",
+    "hint": "使用独立 Playwright 渲染器（需安装依赖并执行 python -m playwright install chromium），失败自动回退纯文本",
+    "type": "bool",
+    "default": true
+  },
+  "render_scale": {
+    "description": "图片渲染清晰度倍率",
+    "hint": "device_scale_factor，2 为高清；过大增加体积",
+    "type": "float",
+    "default": 2.0
+  },
+  "webui_enabled": {
+    "description": "启用独立 WebUI 面板",
+    "type": "bool",
+    "default": true
+  },
+  "webui_host": {
+    "description": "WebUI 监听地址",
+    "hint": "0.0.0.0 表示所有网卡可访问；仅本机查看请改为 127.0.0.1",
+    "type": "string",
+    "default": "0.0.0.0"
+  },
+  "webui_port": {
+    "description": "WebUI 独立端口",
+    "hint": "与其他服务冲突时请修改；启动失败会自动跳过并打印日志",
+    "type": "int",
+    "default": 17817
+  },
+  "cooldown_exempt_users": {
+    "description": "免冷却用户 ID 列表",
+    "type": "list",
+    "default": []
+  },
+  "start_cash": {
+    "description": "新玩家初始现金",
+    "type": "int",
+    "default": 800
+  },
+  "social_insurance_rate": {
+    "description": "五险一金比例（占日薪）",
+    "hint": "打卡时扣除并存入个人公积金账户，买房时可抵扣房款",
+    "type": "float",
+    "default": 0.1
+  },
+  "house_price": {
+    "description": "自购小窝总价",
+    "hint": "买房指令的目标价格，公积金最高可抵扣总价的30%",
+    "type": "int",
+    "default": 100000
+  },
+  "slack_cooldown_minutes": {
+    "description": "摸鱼冷却（分钟）",
+    "type": "float",
+    "default": 60.0
+  },
+  "overtime_cooldown_hours": {
+    "description": "加班冷却（小时）",
+    "type": "float",
+    "default": 3.0
+  },
+  "meal_cooldown_minutes": {
+    "description": "吃饭冷却（分钟）",
+    "type": "float",
+    "default": 30.0
+  },
+  "gym_cooldown_hours": {
+    "description": "健身冷却（小时）",
+    "type": "float",
+    "default": 2.0
+  },
+  "stall_cooldown_hours": {
+    "description": "摆摊副业冷却（小时）",
+    "type": "float",
+    "default": 6.0
+  },
+  "layoff_scale": {
+    "description": "裁员概率倍率",
+    "hint": "乘以公司自身风险值，2.0 = 裁员概率翻倍，0 = 关闭裁员",
+    "type": "float",
+    "default": 1.0
+  },
+  "hospital_threshold": {
+    "description": "住院风险健康阈值",
+    "hint": "加班后健康低于该值时按概率住院并支付医疗费",
+    "type": "int",
+    "default": 15
+  },
+  "promote_base_rate": {
+    "description": "晋升基础成功率",
+    "type": "float",
+    "default": 0.85
+  },
+  "promote_decay": {
+    "description": "晋升成功率逐级递减",
+    "type": "float",
+    "default": 0.06
+  },
+  "train_cooldown_hours": {
+    "description": "进修冷却（小时）",
+    "type": "float",
+    "default": 2.0,
+    "hint": "自费进修班的间隔时间"
+  },
+  "train_success_rate": {
+    "description": "进修成功率",
+    "type": "float",
+    "default": 0.7
+  },
+  "train_cost_rate": {
+    "description": "进修费用系数",
+    "type": "float",
+    "default": 0.1,
+    "hint": "学费 = 身价 × 系数 × 5，最低200元"
+  },
+  "train_value_increase_rate": {
+    "description": "进修成功身价提升比例",
+    "type": "float",
+    "default": 0.2
+  },
+  "duel_cooldown_hours": {
+    "description": "对线冷却（小时）",
+    "type": "float",
+    "default": 2.0
+  },
+  "duel_entry_fee": {
+    "description": "对线报名费",
+    "type": "int",
+    "default": 50
+  },
+  "duel_reward_rate": {
+    "description": "对线获胜奖励（占报名费比例）",
+    "type": "float",
+    "default": 0.2
+  },
+  "duel_value_bonus_rate": {
+    "description": "对线获胜身价提升比例",
+    "type": "float",
+    "default": 0.1
+  },
+  "rank_cooldown_minutes": {
+    "description": "卷王大赛冷却（分钟）",
+    "type": "float",
+    "default": 60.0
+  },
+  "transfer_fee_rate": {
+    "description": "转账手续费率",
+    "type": "float",
+    "default": 0.1
+  },
+  "transfer_min_amount": {
+    "description": "最低转账金额",
+    "type": "int",
+    "default": 100
+  },
+  "bank_initial_limit": {
+    "description": "银行初始存储上限",
+    "type": "int",
+    "default": 5000
+  },
+  "bank_initial_upgrade_price": {
+    "description": "银行首次升级价格",
+    "type": "int",
+    "default": 200
+  },
+  "bank_upgrade_price_multi": {
+    "description": "银行升级价格倍数",
+    "type": "float",
+    "default": 1.2
+  },
+  "bank_limit_increase_multi": {
+    "description": "银行限额增长倍数",
+    "type": "float",
+    "default": 1.25
+  },
+  "bank_interest_rate_hourly": {
+    "description": "银行每小时利率",
+    "type": "float",
+    "default": 0.01
+  },
+  "bank_max_interest_hours": {
+    "description": "最大计息时长（小时）",
+    "type": "int",
+    "default": 24
+  },
+  "fund_fee_rate": {
+    "description": "基金买卖手续费率",
+    "type": "float",
+    "default": 0.005
+  },
+  "rent_auto_deduct": {
+    "description": "打卡时自动扣房租",
+    "hint": "关闭后不扣房租，住房精神恢复减半",
+    "type": "bool",
+    "default": true
+  },
+  "weekly_archive_enabled": {
+    "description": "每周自动归档排行榜",
+    "type": "bool",
+    "default": true
+  },
+  "webui_password": {
+    "description": "WebUI 访问密码",
+    "hint": "留空 = 免密访问；设置后所有页面与 API 需登录（Cookie 加密会话）",
+    "type": "string",
+    "default": ""
+  }
+}

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:"Microsoft YaHei","PingFang SC",sans-serif;
+  background:linear-gradient(150deg,#141a2e 0%,#1b2440 55%,#122a47 100%);
+  width:700px; padding:26px; color:#e8ecf7; }
+.profile { display:flex; align-items:center; gap:15px;
+  background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.09);
+  border-radius:14px; padding:16px 20px; margin-bottom:13px; }
+.avatar { width:62px; height:62px; border-radius:50%; object-fit:cover; border:2px solid #ffd86f; }
+.avf { width:62px; height:62px; border-radius:50%;
+  background:linear-gradient(135deg,#fc6262,#ffd86f); display:flex; align-items:center;
+  justify-content:center; font-size:27px; font-weight:bold; color:#1a1a2e; }
+.pinfo h1 { font-size:23px; color:#ffd86f; }
+.pinfo .sub { color:#8a93b5; font-size:12.5px; margin-top:4px; line-height:1.6; }
+.sec { display:flex; gap:9px; margin-bottom:13px; flex-wrap:wrap; }
+.stat { flex:1; min-width:120px; background:rgba(255,255,255,.05); border-radius:11px; padding:10px 14px; text-align:center; }
+.stat .num { font-size:19px; font-weight:bold; color:#7fd1ff; }
+.stat.gold .num { color:#ffd86f; } .stat.green .num { color:#6fe08c; }
+.stat .lab { font-size:11.5px; color:#8a93b5; margin-top:2px; }
+.card { background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.09);
+  border-radius:13px; padding:14px 17px; margin-bottom:11px; }
+.card h2 { font-size:16px; color:#ffd86f; margin-bottom:9px;
+  border-left:4px solid #fc6262; padding-left:9px; }
+.kvgrid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+.kv { background:rgba(255,255,255,.04); border-radius:9px; padding:7px 11px; font-size:13.5px; color:#c9cede; }
+.kv b { display:block; color:#eef2ff; margin-top:2px; }
+.barwrap { margin:5px 0 3px; }
+.barlab { display:flex; justify-content:space-between; font-size:13px; color:#c9cede; margin-bottom:4px; }
+.bar { height:9px; background:rgba(255,255,255,.08); border-radius:999px; overflow:hidden; }
+.bar i { display:block; height:100%; border-radius:999px; }
+
+.tmpl-footer {
+  text-align:center; color:#8a93b5; font-size:12.5px;
+  margin-top:14px; line-height:1.6;
+}
+</style>
+</head>
+<body>
+  <div class="profile">
+    {% if me.avatar %}<img class="avatar" src="{{ me.avatar }}">{% else %}<div class="avf">{{ me.name[:1] }}</div>{% endif %}
+    <div class="pinfo">
+      <h1>{{ me.name }} 的简历</h1>
+      <div class="sub">ID：{{ me.id }}</div>
+      <div class="sub">{% if company %}{{ company.name }}（{{ company.tag }}）{% else %}目前失业中{% endif %} · {{ position }} · 月薪 {{ salary }} 元</div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="stat gold"><div class="num">{{ total }}</div><div class="lab">总资产（元）</div></div>
+    <div class="stat"><div class="num">{{ exp }}</div><div class="lab">职场经验</div></div>
+    <div class="stat green"><div class="num">{{ streak }}</div><div class="lab">连续出勤（天）</div></div>
+  </div>
+
+  <div class="card">
+    <h2>身体是革命的本钱</h2>
+    <div class="barwrap">
+      <div class="barlab"><span>❤️ 健康</span><span>{{ health }} / 100</span></div>
+      <div class="bar"><i style="width:{{ health }}%;background:linear-gradient(90deg,#6fe08c,#2fbf71)"></i></div>
+    </div>
+    <div class="barwrap">
+      <div class="barlab"><span>🧠 精神</span><span>{{ mind }} / 100</span></div>
+      <div class="bar"><i style="width:{{ mind }}%;background:linear-gradient(90deg,#7fd1ff,#5b8fd6)"></i></div>
+    </div>
+  </div>
+
+  {% if next_title %}
+  <div class="card">
+    <h2>晋升进度 → {{ next_title }}</h2>
+    <div class="barwrap">
+      <div class="barlab"><span>经验 {{ exp }} / {{ next_need }}</span><span>{{ progress }}%</span></div>
+      <div class="bar"><i style="width:{{ progress }}%;background:linear-gradient(90deg,#ffd86f,#ffb86f)"></i></div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>资产与生活</h2>
+    <div class="kvgrid">
+      <div class="kv">现金<b>{{ cash }} 元</b></div>
+      <div class="kv">银行存款<b>{{ deposit }} 元</b></div>
+      <div class="kv">基金持仓<b>{{ fund }} 元</b></div>
+      <div class="kv">住房<b>{{ house.name }}</b></div>
+      <div class="kv">日租金<b>{{ house.rent }} 元</b></div>
+      <div class="kv">身价<b>{{ value }} 元</b></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>职场关系</h2>
+    <div class="kvgrid">
+      <div class="kv">通勤方式<b>{{ commute }}</b></div>
+      <div class="kv">公积金<b>{{ fund_savings }} 元</b></div>
+      <div class="kv">调休券<b>{{ comp_leave }} 张</b></div>
+      <div class="kv">卷王段位<b>{{ rank }}</b></div>
+      <div class="kv">对线战绩<b>{{ duel }}</b></div>
+    </div>
+  </div>
+</body>
+</html>

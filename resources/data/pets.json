@@ -1,0 +1,6 @@
+{
+  "pets": [
+    { "type": "猫", "cost": 2000, "mind_bonus": 5, "desc": "高冷但治愈，偶尔踩你键盘" },
+    { "type": "狗", "cost": 2500, "mind_bonus": 8, "health_bonus": 3, "desc": "忠诚活泼，每天遛狗强制运动" }
+  ]
+}
