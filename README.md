@@ -223,18 +223,43 @@ QQ 群（插件讨论）：[点击加入](https://qm.qq.com/q/8sOZdZTnaw)
 
 ---
 
-## 🗂️ 自定义扩充文案（欢迎PR文案）
+## 🗂️ 自定义扩充文案与数据（所有 JSON 详解）
 
-所有事件文案均位于 `resources/*/*.json`：
-- `work.json`：打卡、摸鱼、加班、辞职、周报文案；
-- `life.json`：吃饭、午休、健身、租房、购物文案；
-- `duel.json`：对线撕逼与卷王对决台词；
-- `news.json`：每日职场头条新闻；
-- `company.json` / `extra.json` / `extra2.json` / `extra3.json`：扩展事件文案。
+插件的所有事件文案与数值数据均位于 `resources/` 目录下，分为 **`texts/`（剧情文案库）** 与 **`data/`（数值规则库）**。直接编辑对应 JSON 文件后，在 WebUI 点击保存或重启/重载插件即可生效：
 
-直接编辑对应 JSON 后在 WebUI 点击保存或重载插件即可生效。
+### 1. 📖 剧情文案库（`resources/texts/`）
 
-也可以PR文案，供其他用户使用
+| 文件名 | 用途与作用 | 包含的主要字段 / 场景 |
+|---|---|---|
+| **`work.json`** | 核心工作日常事件库 | 打卡上班事件 (`checkin_events`)、摸鱼被抓/成功 (`touch_fish_*`)、加班剧情 (`overtime_*`)、辞职/跳槽感想 (`resign_*` / `jobjump_*`)、写周报反馈 (`weekly_report_*`) |
+| **`life.json`** | 丰富生活日常事件库 | 吃饭文案（`takeout` 外卖 / `canteen` 食堂 / `feast` 大餐）、`nap` 午休、`fitness` 健身、`rent` 租房搬家、`buy_house` 买房安家、`street_stall` 摆摊日记、`gossip` 职场吃瓜八卦、`advice` 职场毒鸡汤建议 |
+| **`company.json`**| 公司与创业相关文案 | `jinxiu_ok` / `jinxiu_fail`（技能进修成败）、`talk_salary_*`（跟老板加薪谈判）、`create_co_ok`（自主创业成功）、`dividend_ok`（公司分红） |
+| **`duel.json`** | 撕逼对线台词库 | `actions`（同事方案撕逼互怼过程中的经典金句台词、阴阳怪气语录） |
+| **`news.json`** | 职场早报头条库 | `headlines`（每日职场早报广播播报的各种离谱热搜头条与行业搞笑新闻） |
+| **`extra.json`** | 职场进阶扩展文案 | `yearbonus_ok` / `yearbonus_bad`（年终奖发放）、`scratch_win` / `scratch_lose`（下班刮刮乐）、`team_building_*`（公司团建体验）、`annual_leave_*`（请带薪年假） |
+| **`extra2.json`**| 办公室社交与福利文案 | `party_prizes`（年会抽奖各档奖品与描述）、`praise_*`（同事夸夸）、`mock_*`（阴阳怪气同事）、`workstation_up_*`（工位升星体验）、`night_snack_*`（加班免费夜宵）、`medical_check_*`（年度体检报告） |
+| **`extra3.json`**| 高阶互动与差旅文案 | `meeting`（开会表现与心理活动）、`reply_msg`（领导/客户消息回复）、`book_room`（抢会议室大战）、`summit`（行业高端峰会参会体验）、`travel`（度假旅游散心） |
+| **`help.json`** | 菜单帮助文档配置 | `sections`（各个模块指令用法 `usage` 与功能描述 `desc`） |
+
+---
+
+### 2. 📊 核心数值与配置库（`resources/data/`）
+
+| 文件名 | 用途与作用 | 包含的主要字段 / 场景 |
+|---|---|---|
+| **`companies.json`** | 预设招聘企业库（116+家） | `id`、`name`（公司名）、`tag`（行业标签）、`salary`（底薪）、`intensity`（工作强度）、`risk`（裁员率）、`min_exp`（投递经验门槛）、`desc` |
+| **`positions.json`** | 职级梯队体系（12个等级） | `i`（职级等级 0~11）、`title`（头衔：实习生~合伙人）、`mult`（薪资系数 0.6x~5.0x）、`need`（晋升所需经验）、`cost`（升职答辩报名费） |
+| **`shop.json`** | 打工人便利店道具库（25+件）| `id`、`name`（如浓缩咖啡/带薪拉屎卡/老板雷达）、`price`（售价）、`health`（健康恢复）、`mind`（精神恢复）、`desc`（道具效果描述） |
+| **`houses.json`** | 租房与房产梯队库 | `i`（房产档位）、`name`（桥洞/合租床位/城中村/江景大平层等）、`rent`（每日租金）、`recover`（每日自动回血回蓝）、`deposit`（押金） |
+| **`stocks.json`** | 股市行情标的库（100支） | `code`（股票代码）、`name`（股票名称）、`sector`（所属板块）、`price`（基准股价） |
+| **`opponents.json`** | 卷王争霸赛对手库 | `name`（晨会战神/PPT炼金术士/OKR卷王等）、`score`（挑战所需卷度战力）、`effect`（对手特征与被动） |
+| **`rankevents.json`**| 卷王挑战对决事件池 | 卷王争霸挑战过程中的判定与结算事件 |
+| **`workstations.json`**| 工位升级阶梯配置 | `lv`（工位等级 0~4）、`name`（人体工学椅/升降桌/顶级工位等）、`cost`（升级费用）、`bonus`（打卡/加班额外加成） |
+| **`pets.json`** | 宠物领养体系配置 | `type`（猫/狗）、`cost`（领养价格）、`mind_bonus` / `health_bonus`（每日互动加成效果） |
+
+---
+
+欢迎提交 PR 补充或丰富插件的创意文案与企业！
 
 ---
 
