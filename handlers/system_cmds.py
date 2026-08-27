@@ -63,7 +63,35 @@ async def rank_board(ctx, event):
     word = next((w for w in RANK_KINDS if w in (event.message_str or "")), None)
     if not word:
         return R(err="未知排行榜")
-    return await social.rank_data(ctx.db, gid, RANK_KINDS[word])
+    return await social.rank_data(ctx.db, gid, RANK_KINDS[word], ctx.app_id)
+
+
+async def today_event(ctx, event):
+    from ..core import logic
+    today = logic.today_str()
+    import random
+    events_pool = [
+        ("🚀 行业风口来袭", "今日全员打卡收益与经验提升 +30%！站在风口上，猪都能飞！", "#6fe08c"),
+        ("🚨 突击大检查", "今日各公司摸鱼被抓概率上升，各位打工人请务必留意领导动向！", "#fc6262"),
+        ("☕ 全员下午茶日", "今日公司福利大放送，所有生活消费与吃饭精神恢复翻倍！", "#ffd86f"),
+        ("⚡ 行业黑天鹅", "今日股市震荡加剧，裁员风险小幅波动，请系好安全带！", "#b48cff"),
+        ("🏖️ 提早下班令", "今日加班获得的调休券掉率提升至 50%，打工人狂喜！", "#7fd1ff"),
+    ]
+    seed_val = int(today.replace("-", ""))
+    rng = random.Random(seed_val)
+    title, desc, accent = rng.choice(events_pool)
+
+    return R(
+        tmpl="panel",
+        data={
+            "icon": "📢",
+            "title": f"今日突发群事件 · {today}",
+            "accent": accent,
+            "lines": [f"【{title}】", desc],
+            "foot": "全群今日生效，次日 00:00 刷新",
+        },
+        text=f"📢 今日群突发事件【{title}】：{desc}",
+    )
 
 
 ROUTES = [
@@ -74,7 +102,8 @@ ROUTES = [
         help_cmd,
         priority=5,
     ),
-    Route(r"^[#](职场早报|早报|新闻)$", "cmd_news", "查看今日职场早报", news),
+    Route(r"^[#]?(职场早报|早报|新闻)$", "cmd_news", "查看今日职场早报", news),
+    Route(r"^[#]?(今日事件|群事件|突发事件)$", "cmd_today_event", "查看今日全群突发公共事件与全员Buff", today_event),
     Route(
         r"^[#]?(富豪榜|卷王榜|身价榜|职级榜)$",
         "cmd_rank_board",

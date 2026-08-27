@@ -338,10 +338,16 @@ class WebUIServer:
         if not self._authed(request):
             return self._unauth()
         body = await request.json()
+        try:
+            price = float(body["price"]) if "price" in body else None
+            if price is not None and not (0 < price < 1_000_000):
+                raise ValueError
+        except (TypeError, ValueError):
+            return _json({"ok": False, "error": "价格非法"}, 400)
         ok = self.market.admin_edit(
             str(body.get("code", "")),
             str(body["name"]) if "name" in body else None,
-            float(body["price"]) if "price" in body else None,
+            price,
         )
         return _json({"ok": ok})
 
@@ -669,7 +675,10 @@ class WebUIServer:
         if not self._authed(request):
             return self._unauth()
         gid = request.query.get("gid", "")
-        page = int(request.query.get("page", "1"))
+        try:
+            page = max(1, int(request.query.get("page", "1")))
+        except (TypeError, ValueError):
+            page = 1
         size = 20
         players = await asyncio.to_thread(self.db.all_players, gid) if gid else []
         total = len(players)

@@ -30,7 +30,8 @@ class PlaywrightRenderer:
         if self._env is None:
             from jinja2 import Environment
 
-            self._env = Environment(autoescape=False)
+            # 自动转义：昵称/群名片等用户可控内容不注入 HTML
+            self._env = Environment(autoescape=True)
         return self._env.from_string(template_str).render(**data)
 
     # ---------- 截图 ----------

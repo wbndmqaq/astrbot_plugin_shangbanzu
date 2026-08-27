@@ -33,7 +33,7 @@ async def colleagues(ctx, event):
     gid = _gid(event)
     if not gid:
         return R(err=GID_HINT)
-    return await social.market_list(ctx.db, gid)
+    return await social.market_list(ctx.db, gid, ctx.app_id)
 
 
 ROUTES = [

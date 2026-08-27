@@ -33,17 +33,19 @@ body { font-family:"Microsoft YaHei","PingFang SC",sans-serif;
 <body>
   <div class="head">
     <h1>🏪 人才市场</h1>
-    <div class="sub">共 {{ count }} 位打工人 · 按职级与月薪排序</div>
+    <div class="sub">共 {{ count or 0 }} 位打工人 · 按职级与月薪排序</div>
   </div>
   <div class="grid">
-    {% for r in rows %}
+    {% for r in rows or [] %}
+    {% if r is mapping and r.name %}
     <div class="row">
-      <div class="rk">{% if r.rank == 1 %}🥇{% elif r.rank == 2 %}🥈{% elif r.rank == 3 %}🥉{% else %}{{ r.rank }}{% endif %}</div>
-      {% if r.avatar %}<img src="{{ r.avatar }}">{% else %}<div class="avf">{{ r.name[:1] }}</div>{% endif %}
-      <div class="nm"><b>{{ r.name }}</b><span>{{ r.id }}</span></div>
-      <div class="mid">{{ r.company }} · {{ r.position }}<br>月薪 {{ r.boss }}</div>
-      <div class="val">{{ r.value }} 元</div>
+      <div class="rk">{% if r.rank == 1 %}🥇{% elif r.rank == 2 %}🥈{% elif r.rank == 3 %}🥉{% else %}{{ r.rank or loop.index }}{% endif %}</div>
+      {% if r.avatar %}<img src="{{ r.avatar }}">{% elif r.name %}<div class="avf">{{ r.name[:1] }}</div>{% else %}<div class="avf">?</div>{% endif %}
+      <div class="nm"><b>{{ r.name }}</b><span>{{ r.id or '' }}</span></div>
+      <div class="mid">{{ r.company or '无业' }} · {{ r.position or '实习生' }}<br>月薪 {{ r.boss or 0 }}</div>
+      <div class="val">{{ r.value or 0 }} 元</div>
     </div>
+    {% endif %}
     {% endfor %}
   </div>
 </body>

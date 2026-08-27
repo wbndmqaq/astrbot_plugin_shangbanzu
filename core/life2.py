@@ -48,9 +48,9 @@ async def meeting(ctx_db, gid, uid, nickname, cfg):
     )
 
 
-async def bring_food(ctx_db, gid, uid, me, target, nickname, cfg, target_name=""):
+async def bring_food(ctx_db, gid, me, target, nickname, cfg, target_name=""):
     cost = 15
-    p = await _load(ctx_db, gid, uid, nickname, cfg)
+    p = await _load(ctx_db, gid, me, nickname, cfg)
     if float(p["cash"]) < cost:
         return R(err=f"带饭要 {cost} 元，余额不足")
     td = await _load(ctx_db, gid, target, target_name, cfg)
@@ -141,9 +141,9 @@ async def meeting_room(ctx_db, gid, uid, nickname, cfg):
     )
 
 
-async def eat_with(ctx_db, gid, uid, me, target, nickname, cfg, target_name=""):
+async def eat_with(ctx_db, gid, me, target, nickname, cfg, target_name=""):
     cost = random.choice([50, 80, 120])
-    p = await _load(ctx_db, gid, uid, nickname, cfg)
+    p = await _load(ctx_db, gid, me, nickname, cfg)
     td = await _load(ctx_db, gid, target, target_name, cfg)
     if float(p["cash"]) < cost:
         return R(err=f"吃饭预计 {cost} 元，余额不足")
@@ -186,7 +186,7 @@ async def boss_task(ctx_db, gid, uid, nickname, cfg):
         reward = logic.ri(50, 200)
         p["cash"] = round(float(p["cash"]) + reward, 2)
         p["exp"] = int(p["exp"]) + logic.ri(3, 8)
-        await asyncio.to_thread(db_save(ctx_db, gid, uid, p))
+        await asyncio.to_thread(ctx_db.save_player, p)
         line = logic.pick(gd.t("extra3", "boss_task_ok"))
         return R(
             tmpl="panel",
@@ -204,7 +204,7 @@ async def boss_task(ctx_db, gid, uid, nickname, cfg):
     cost = logic.ri(30, 100)
     p["cash"] = round(max(0, float(p["cash"]) - cost), 2)
     p["mind"] = round(float(p["mind"]) - 5, 1)
-    await asyncio.to_thread(db_save(ctx_db, gid, uid, p))
+    await asyncio.to_thread(ctx_db.save_player, p)
     line = logic.pick(gd.t("extra3", "boss_task_fail"))
     return R(
         tmpl="panel",
@@ -217,11 +217,6 @@ async def boss_task(ctx_db, gid, uid, nickname, cfg):
         },
         text=f"帮领导做事搞砸了：{line}（损失 {cost} 元）",
     )
-
-
-def db_save(db, gid, uid, p):
-
-    return db.save_player(p)
 
 
 async def summit(ctx_db, gid, uid, nickname, cfg):
@@ -264,8 +259,8 @@ async def summit(ctx_db, gid, uid, nickname, cfg):
 
 async def adopt_pet(ctx_db, gid, uid, nickname, pet_type, cfg):
     p = await _load(ctx_db, gid, uid, nickname, cfg)
-    if p.get("_pet"):
-        return R(err=f"你已经有宠物了（{p['_pet']}），一心不能二用")
+    if p.get("pet"):
+        return R(err=f"你已经有宠物了（{p['pet']}），一心不能二用")
     pets = gd.load_all().get("pets", {}).get("pets", [])
     pet = next((x for x in pets if x["type"] == pet_type), None)
     if not pet:
@@ -276,7 +271,7 @@ async def adopt_pet(ctx_db, gid, uid, nickname, pet_type, cfg):
             err=f"养{pet_type}需要 {logic.fmt_money(cost)} 元（含 initial 费用），余额不足"
         )
     p["cash"] = round(float(p["cash"]) - cost, 2)
-    p["_pet"] = pet_type
+    p["pet"] = pet_type
     await asyncio.to_thread(ctx_db.save_player, p)
     return R(
         tmpl="panel",
@@ -297,7 +292,7 @@ async def adopt_pet(ctx_db, gid, uid, nickname, pet_type, cfg):
 
 async def pet_interact(ctx_db, gid, uid, nickname):
     p = await asyncio.to_thread(ctx_db.get_player, gid, uid, nickname)
-    pet = p.get("_pet")
+    pet = p.get("pet")
     if not pet:
         return R(err="你还没有宠物，去宠物店领养一只吧")
     today = _today()

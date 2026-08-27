@@ -1,9 +1,10 @@
 """数据备份：基于 sqlite3 在线 backup API 的安全快照。"""
 
-import shutil
 import sqlite3
 import time
 from pathlib import Path
+
+from .db import _write_lock
 
 
 class BackupManager:
@@ -25,8 +26,9 @@ class BackupManager:
         src = sqlite3.connect(self.path(), timeout=15)
         dest = sqlite3.connect(dest_path, timeout=15)
         try:
-            src.backup(dest)
-            dest.commit()
+            with _write_lock:
+                src.backup(dest)
+                dest.commit()
         finally:
             dest.close()
             src.close()
@@ -60,11 +62,17 @@ class BackupManager:
         if item is None:
             return None
         target = self.dir / f"{item['name']}.db"
-        # 移除当前库的 wal/shm，避免旧日志污染恢复后的数据
-        for suffix in ("-wal", "-shm"):
-            side = self.db_path.with_name(self.db_path.name + suffix)
-            side.unlink(missing_ok=True)
-        shutil.copyfile(target, self.db_path)
+        # 用在线 backup API 恢复到运行中的主库，避免直接覆盖文件
+        # 与 WAL 日志产生一致性风险
+        src = sqlite3.connect(target, timeout=15)
+        dst = sqlite3.connect(self.path(), timeout=15)
+        try:
+            with _write_lock:
+                src.backup(dst)
+                dst.commit()
+        finally:
+            dst.close()
+            src.close()
         self._log(f"恢复备份 {item['name']}")
         return item
 

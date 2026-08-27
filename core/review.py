@@ -1,4 +1,4 @@
-"""年终考评系统：每年12月可触发一次，S/A/B/C/D 五档考评。"""
+"""年终考评系统：每年限一次，S/A/B/C/D 五档考评。"""
 
 import asyncio
 import random
@@ -15,8 +15,7 @@ async def annual_review(db, gid, uid, nickname, cfg):
         return R(err="失业人士没有年终考评，先找工作吧")
 
     year = time.strftime("%Y")
-    key = f"review_{year}"
-    if p.get(key):
+    if p.get("review_year") == year:
         return R(err=f"{year} 年的年终考评已经做过了，明年再战")
 
     lvl = int(p["lvl"])
@@ -62,7 +61,7 @@ async def annual_review(db, gid, uid, nickname, cfg):
     if raise_pct > 0:
         p["salary"] = round(old_salary * (1 + raise_pct), 0)
 
-    p[key] = time.strftime("%Y-%m-%d")
+    p["review_year"] = year
     p["cash"] = round(float(p["cash"]) + bonus, 2)
     p["total_earned"] = round(float(p.get("total_earned") or 0) + bonus, 2)
     _clamp = lambda v: max(0, min(100, v))

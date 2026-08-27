@@ -134,7 +134,23 @@ async def resume(ctx, event):
     gid = _gid(event)
     if not gid:
         return R(err=GID_HINT)
-    return await life.resume(ctx.db, gid, event.get_sender_id(), ctx.nick(event))
+    return await life.resume(ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.app_id)
+
+
+async def my_bag(ctx, event):
+    gid = _gid(event)
+    if not gid:
+        return R(err=GID_HINT)
+    return await life.my_bag(ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config)
+
+
+async def use_item(ctx, event):
+    gid = _gid(event)
+    if not gid:
+        return R(err=GID_HINT)
+    m = re.search(r"^[#]?使用\s*(\S+)", event.message_str or "")
+    item_name = (m.group(1) if m else "").strip()
+    return await life.use_item(ctx.db, gid, event.get_sender_id(), ctx.nick(event), item_name, ctx.config)
 
 
 ROUTES = [
@@ -170,11 +186,13 @@ ROUTES = [
     ),
     Route(r"^[#]?(商店|便利店|商城)$", "cmd_shop", "查看便利店货架", shop_page),
     Route(
-        r"^[#](购买|买)(?!(基金|房|彩票))\s*\S+",
+        r"^[#]?(购买|买)(?!(基金|房|彩票|股票))\s*\S+",
         "cmd_buy",
         "从便利店购买物品",
         shop_buy,
     ),
+    Route(r"^[#]?(我的背包|背包|道具包)$", "cmd_bag", "查看自己拥有的职场道具卡", my_bag),
+    Route(r"^[#]?使用\s*\S+", "cmd_use_item", "使用背包中的职场道具卡，如：使用 咖啡续命包", use_item),
     Route(
         r"^[#]?(我的简历|简历|我的状态|状态)$",
         "cmd_resume",

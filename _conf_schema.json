@@ -154,16 +154,6 @@
     "type": "int",
     "default": 100
   },
-  "bank_initial_limit": {
-    "description": "银行初始存储上限",
-    "type": "int",
-    "default": 5000
-  },
-  "bank_initial_upgrade_price": {
-    "description": "银行首次升级价格",
-    "type": "int",
-    "default": 200
-  },
   "bank_upgrade_price_multi": {
     "description": "银行升级价格倍数",
     "type": "float",
@@ -189,6 +179,11 @@
     "type": "float",
     "default": 0.005
   },
+  "stock_fee_rate": {
+    "description": "买卖股票的手续费率",
+    "type": "float",
+    "default": 0.005
+  },
   "rent_auto_deduct": {
     "description": "打卡时自动扣房租",
     "hint": "关闭后不扣房租，住房精神恢复减半",
@@ -197,8 +192,45 @@
   },
   "weekly_archive_enabled": {
     "description": "每周自动归档排行榜",
+    "hint": "每周首次触发时把上一周各群财富榜快照写入数据库",
     "type": "bool",
     "default": true
+  },
+  "annual_leave_days": {
+    "description": "每年年假天数",
+    "hint": "跨年时自动重置为该值",
+    "type": "int",
+    "default": 3
+  },
+  "push_hour": {
+    "description": "每日推送时间（小时）",
+    "hint": "24 小时制；到点后向开启「推送」的群发送职场早报与股市摘要",
+    "type": "int",
+    "default": 8
+  },
+  "create_company_cost": {
+    "description": "创业注册验资资金",
+    "hint": "玩家自建公司所需要的现金门槛（元）",
+    "type": "float",
+    "default": 30000.0
+  },
+  "create_company_min_value": {
+    "description": "创业所需最低身价",
+    "hint": "玩家自建公司所需要的职场身价门槛（元）",
+    "type": "float",
+    "default": 50000.0
+  },
+  "scratch_lottery_cost": {
+    "description": "刮刮乐单张售价",
+    "hint": "下班刮刮乐彩票单张购买花费（元）",
+    "type": "float",
+    "default": 20.0
+  },
+  "redpacket_min_amount": {
+    "description": "群红包最低总金额",
+    "hint": "群聊塞红包允许的最低起始总金额（元）",
+    "type": "float",
+    "default": 10.0
   },
   "webui_password": {
     "description": "WebUI 访问密码",

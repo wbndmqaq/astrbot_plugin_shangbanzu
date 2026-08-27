@@ -41,11 +41,11 @@ body { font-family:"Microsoft YaHei","PingFang SC",sans-serif;
 </head>
 <body>
   <div class="profile">
-    {% if me.avatar %}<img class="avatar" src="{{ me.avatar }}">{% else %}<div class="avf">{{ me.name[:1] }}</div>{% endif %}
+    {% if me and me.avatar %}<img class="avatar" src="{{ me.avatar }}">{% elif me and me.name %}<div class="avf">{{ me.name[:1] }}</div>{% else %}<div class="avf">?</div>{% endif %}
     <div class="pinfo">
-      <h1>{{ me.name }} 的简历</h1>
-      <div class="sub">ID：{{ me.id }}</div>
-      <div class="sub">{% if company %}{{ company.name }}（{{ company.tag }}）{% else %}目前失业中{% endif %} · {{ position }} · 月薪 {{ salary }} 元</div>
+      <h1>{{ me.name if me and me.name else '打工人' }} 的简历</h1>
+      <div class="sub">ID：{{ me.id if me and me.id else '-' }}</div>
+      <div class="sub">{% if company %}{{ company.name }}（{{ company.tag }}）{% else %}目前失业中{% endif %} · {{ position or '无业游民' }} · 月薪 {{ salary or 0 }} 元</div>
     </div>
   </div>
 
@@ -78,14 +78,14 @@ body { font-family:"Microsoft YaHei","PingFang SC",sans-serif;
   {% endif %}
 
   <div class="card">
-    <h2>资产与生活</h2>
+    <h2 style="color:#ffd86f;border-left:4px solid #fc6262;padding-left:9px;margin-bottom:9px;font-size:16px;">资产与生活</h2>
     <div class="kvgrid">
-      <div class="kv">现金<b>{{ cash }} 元</b></div>
-      <div class="kv">银行存款<b>{{ deposit }} 元</b></div>
-      <div class="kv">基金持仓<b>{{ fund }} 元</b></div>
-      <div class="kv">住房<b>{{ house.name }}</b></div>
-      <div class="kv">日租金<b>{{ house.rent }} 元</b></div>
-      <div class="kv">身价<b>{{ value }} 元</b></div>
+      <div class="kv">现金<b>{{ cash or 0 }} 元</b></div>
+      <div class="kv">银行存款<b>{{ deposit or 0 }} 元</b></div>
+      <div class="kv">基金持仓<b>{{ fund or 0 }} 元</b></div>
+      <div class="kv">住房<b>{{ house.name if house and house.name else '桥洞风水宝地' }}</b></div>
+      <div class="kv">日租金<b>{{ house.rent if house and house.rent is defined else 0 }} 元</b></div>
+      <div class="kv">身价<b>{{ value or 0 }} 元</b></div>
     </div>
   </div>
 

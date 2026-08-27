@@ -51,13 +51,45 @@ CREATE TABLE IF NOT EXISTS players (
     social_pts INTEGER DEFAULT 0,
     side_lvl INTEGER DEFAULT 1,
     annual_leave INTEGER DEFAULT 3,
+    annual_year TEXT DEFAULT '',
     year_bonus_year TEXT DEFAULT '',
     workstation INTEGER DEFAULT 0,
     party_year TEXT DEFAULT '',
     checkup_year TEXT DEFAULT '',
+    meeting_day TEXT DEFAULT '',
+    reply_day TEXT DEFAULT '',
+    room_day TEXT DEFAULT '',
+    pet_day TEXT DEFAULT '',
+    pet TEXT DEFAULT '',
+    items TEXT DEFAULT '{}',
+    title TEXT DEFAULT '',
+    achievements TEXT DEFAULT '[]',
+    review_year TEXT DEFAULT '',
     created_at INTEGER DEFAULT 0,
     updated_at INTEGER DEFAULT 0,
     PRIMARY KEY (gid, uid)
+);
+CREATE TABLE IF NOT EXISTS redpackets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gid TEXT NOT NULL,
+    sender_uid TEXT NOT NULL,
+    sender_name TEXT DEFAULT '',
+    total_amount REAL NOT NULL,
+    total_count INTEGER NOT NULL,
+    remain_amount REAL NOT NULL,
+    remain_count INTEGER NOT NULL,
+    claimed_records TEXT DEFAULT '[]',
+    created_at INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS custom_companies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gid TEXT NOT NULL,
+    boss_uid TEXT NOT NULL,
+    name TEXT NOT NULL,
+    tag TEXT DEFAULT '创业',
+    salary REAL DEFAULT 5000,
+    balance REAL DEFAULT 0,
+    created_at INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,6 +104,7 @@ CREATE INDEX IF NOT EXISTS idx_tx_player ON transactions (gid, uid, id);
 CREATE TABLE IF NOT EXISTS push_groups (
     gid TEXT PRIMARY KEY,
     enabled INTEGER DEFAULT 1,
+    last_push TEXT DEFAULT '',
     updated_at INTEGER DEFAULT 0
 );
 
@@ -160,10 +193,20 @@ COLUMNS = [
     "social_pts",
     "side_lvl",
     "annual_leave",
+    "annual_year",
     "year_bonus_year",
     "workstation",
     "party_year",
     "checkup_year",
+    "meeting_day",
+    "reply_day",
+    "room_day",
+    "pet_day",
+    "pet",
+    "items",
+    "title",
+    "achievements",
+    "review_year",
     "created_at",
     "updated_at",
 ]
@@ -204,6 +247,24 @@ DEFAULTS = {
     "comp_leave": 0,
     "commute": "地铁",
     "house_owned": 0,
+    "skills": "[]",
+    "social_pts": 0,
+    "side_lvl": 1,
+    "annual_leave": 3,
+    "annual_year": "",
+    "year_bonus_year": "",
+    "workstation": 0,
+    "party_year": "",
+    "checkup_year": "",
+    "meeting_day": "",
+    "reply_day": "",
+    "room_day": "",
+    "pet_day": "",
+    "pet": "",
+    "items": "{}",
+    "title": "",
+    "achievements": "[]",
+    "review_year": "",
     "created_at": 0,
     "updated_at": 0,
 }
@@ -371,8 +432,8 @@ class DB:
         conn = self._conn()
         try:
             row = conn.execute(
-                "SELECT * FROM players WHERE gid=? AND (uid=? OR nickname LIKE ?) LIMIT 1",
-                (str(gid), str(kw), f"%{kw}%"),
+                "SELECT * FROM players WHERE gid=? AND (uid=? OR uid LIKE ? OR nickname LIKE ?) LIMIT 1",
+                (str(gid), str(kw), f"%{kw}%", f"%{kw}%"),
             ).fetchone()
         finally:
             conn.close()
@@ -454,14 +515,14 @@ class DB:
             conn.close()
 
     def set_push(self, gid: str, enabled: bool):
-        import time
-
         with _write_lock:
             conn = self._conn()
             try:
                 if enabled:
                     conn.execute(
-                        "INSERT OR IGNORE INTO push_groups (gid,enabled,updated_at) VALUES (?,1,?)",
+                        "INSERT INTO push_groups (gid,enabled,updated_at) VALUES (?,1,?) "
+                        "ON CONFLICT(gid) DO UPDATE SET enabled=1,"
+                        "updated_at=excluded.updated_at",
                         (str(gid), int(time.time())),
                     )
                 else:
@@ -469,6 +530,28 @@ class DB:
                         "UPDATE push_groups SET enabled=0, updated_at=? WHERE gid=?",
                         (int(time.time()), str(gid)),
                     )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def push_last_date(self, gid: str) -> str:
+        conn = self._conn()
+        try:
+            row = conn.execute(
+                "SELECT last_push FROM push_groups WHERE gid=?", (str(gid),)
+            ).fetchone()
+            return str(row["last_push"] or "") if row else ""
+        finally:
+            conn.close()
+
+    def mark_pushed(self, gid: str, date_str: str):
+        with _write_lock:
+            conn = self._conn()
+            try:
+                conn.execute(
+                    "UPDATE push_groups SET last_push=?, updated_at=? WHERE gid=?",
+                    (str(date_str), int(time.time()), str(gid)),
+                )
                 conn.commit()
             finally:
                 conn.close()

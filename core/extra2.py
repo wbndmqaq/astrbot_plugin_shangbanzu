@@ -127,7 +127,7 @@ async def lend_money(db, gid, me, target, amount, cfg, target_name=""):
     )
 
 
-async def career_advice(ctx_db):
+async def career_advice(ctx_db=None):
     advices = gd.t("extra2", "career_advice")
     tip = logic.pick(advices)
     return R(

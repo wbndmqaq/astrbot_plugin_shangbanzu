@@ -163,12 +163,13 @@ async def upgrade_credit(db, gid, uid, max_mode, cfg, nickname=""):
 
 async def bank_info(db, gid, uid, cfg, nickname=""):
     p = await _load(db, gid, uid, nickname, cfg)
-    interest = logic.interest_of(
-        float(p["deposit"]),
-        int(p["last_interest"]),
-        float(logic.cfg_get(cfg, "bank_interest_rate_hourly", 0.01)),
-        int(logic.cfg_get(cfg, "bank_max_interest_hours", 24)),
-    )
+    rate = float(logic.cfg_get(cfg, "bank_interest_rate_hourly", 0.01))
+    max_h = int(logic.cfg_get(cfg, "bank_max_interest_hours", 24))
+    last = int(p["last_interest"] or 0)
+    if last > 0:
+        interest = logic.interest_of(float(p["deposit"]), last, rate, max_h)
+    else:
+        interest = 0.0
     fund_note = ""
     settle = _settle_fund(p)
     if settle and float(p["fund"]) > 0:
@@ -206,9 +207,31 @@ async def collect_interest(db, gid, uid, cfg, nickname=""):
     p = await _load(db, gid, uid, nickname, cfg)
     rate = float(logic.cfg_get(cfg, "bank_interest_rate_hourly", 0.01))
     max_h = int(logic.cfg_get(cfg, "bank_max_interest_hours", 24))
-    interest = logic.interest_of(
-        float(p["deposit"]), int(p["last_interest"]), rate, max_h
-    )
+    last = int(p["last_interest"] or 0)
+    if last <= 0:
+        # 首次领取：先建立计息基准，否则 last_interest 恒为 0 会永远领不到
+        if float(p["deposit"]) <= 0:
+            return R(err="当前没有存款，没有利息可领（每小时结算一次哦）")
+        p["last_interest"] = int(time.time())
+        await asyncio.to_thread(db.save_player, p)
+        return R(
+            tmpl="panel",
+            data={
+                "icon": "🪙",
+                "title": "利息已开始累计",
+                "accent": "#7fd1ff",
+                "blocks": [
+                    {"label": "存款", "value": f"{_fmt(p['deposit'])} 元"},
+                    {
+                        "label": "利率",
+                        "value": f"每小时 {rate * 100:.0f}%（单日最多计 {max_h} 小时）",
+                    },
+                ],
+                "foot": "一小时后即可领取第一笔利息，记得每天来拿",
+            },
+            text="利息已开始按小时累计，一小时后回来领取吧",
+        )
+    interest = logic.interest_of(float(p["deposit"]), last, rate, max_h)
     if interest <= 0:
         return R(err="当前没有可领取的利息（每小时结算一次，存款才有利息哦）")
     p["cash"] = round(float(p["cash"]) + interest, 2)
@@ -319,8 +342,8 @@ async def fund_sell(db, gid, uid, ratio_str, cfg, nickname=""):
     else:
         ratio = 1.0
     sell_amount = round(hold * ratio, 2)
-    fee = math.ceil(sell_amount * float(logic.cfg_get(cfg, "fund_fee_rate", 0.005)))
-    income = max(0, int(sell_amount - fee))
+    fee = round(sell_amount * float(logic.cfg_get(cfg, "fund_fee_rate", 0.005)), 2)
+    income = round(max(0.0, sell_amount - fee), 2)
     p["fund"] = round(hold - sell_amount, 2)
     if abs(p["fund"]) < 0.01:
         p["fund"] = 0.0
@@ -330,12 +353,11 @@ async def fund_sell(db, gid, uid, ratio_str, cfg, nickname=""):
     if settle:
         emoji = "📈" if settle["change"] >= 0 else "📉"
         lines.append(f"今日净值波动：{emoji} {settle['change']:+.2f}%")
-    profit_word = "割肉离场" if income < sell_amount else "落袋为安"
     return R(
         tmpl="panel",
         data={
             "icon": "💰",
-            "title": f"赎回成功 · {profit_word}",
+            "title": "基金赎回成功",
             "accent": "#7fd1ff",
             "lines": lines,
             "blocks": [

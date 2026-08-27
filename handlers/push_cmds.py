@@ -1,5 +1,7 @@
 """推送开关指令路由。"""
 
+import asyncio
+
 from ..core.result import R
 from .base import Route
 
@@ -10,17 +12,23 @@ async def toggle_push(ctx, event):
     gid = event.get_group_id() or ""
     if not gid:
         return R(err=GID)
-    cur = ctx.db.push_enabled(gid)
-    ctx.db.set_push(gid, not cur)
+    cur = await asyncio.to_thread(ctx.db.push_enabled, gid)
+    await asyncio.to_thread(ctx.db.set_push, gid, not cur)
     state = "已开启" if not cur else "已关闭"
+    body = (
+        "开启后，每天早上会向本群推送职场早报与股市摘要。"
+        if not cur
+        else "本群将不再接收每日早报推送。"
+    )
     return R(
         tmpl="panel",
         data={
             "icon": "🔔" if not cur else "🔕",
             "title": f"推送{state}",
             "accent": "#6fe08c" if not cur else "#fc6262",
-            "text": f"本群推送{state}，发送「推送」可切换",
+            "lines": [body],
         },
+        text=f"本群推送{state}。{body}",
     )
 
 
@@ -28,14 +36,15 @@ async def push_status(ctx, event):
     gid = event.get_group_id() or ""
     if not gid:
         return R(err=GID)
-    on = ctx.db.push_enabled(gid)
-    groups = ctx.db.push_group_ids()
+    on = await asyncio.to_thread(ctx.db.push_enabled, gid)
+    groups = await asyncio.to_thread(ctx.db.push_group_ids)
     return R(
         tmpl="panel",
         data={
             "icon": "📡",
             "title": "推送状态",
             "accent": "#7fd1ff",
+            "lines": ["推送内容：每日职场早报 + 股市摘要"],
             "blocks": [
                 {"label": "本群推送", "value": "已开启" if on else "未开启"},
                 {"label": "全服开启群数", "value": f"{len(groups)} 群"},

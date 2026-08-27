@@ -199,6 +199,46 @@
       "health": 10,
       "mind": 15,
       "desc": "再也不用趴在桌上了，午休质量起飞"
+    },
+    {
+      "id": 26,
+      "name": "防甩锅护盾",
+      "price": 300,
+      "health": 0,
+      "mind": 10,
+      "type": "card",
+      "card_key": "shield",
+      "desc": "【职场神具】抵挡一次摸鱼被抓或对线撕逼失败损失"
+    },
+    {
+      "id": 27,
+      "name": "带薪拉屎卡",
+      "price": 500,
+      "health": 5,
+      "mind": 25,
+      "type": "card",
+      "card_key": "poop",
+      "desc": "【职场神具】下次摸鱼100%成功且精神双倍恢复"
+    },
+    {
+      "id": 28,
+      "name": "咖啡续命包",
+      "price": 400,
+      "health": 15,
+      "mind": 30,
+      "type": "card",
+      "card_key": "coffee_pack",
+      "desc": "【职场神具】瞬间恢复30点健康与30点精神，重置加班疲劳"
+    },
+    {
+      "id": 29,
+      "name": "老板雷达",
+      "price": 600,
+      "health": 0,
+      "mind": 15,
+      "type": "card",
+      "card_key": "radar",
+      "desc": "【职场神具】探测今日公司突发事件与摸鱼风险系数"
     }
   ]
 }

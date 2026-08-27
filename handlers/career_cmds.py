@@ -17,7 +17,7 @@ async def find_job(ctx, event):
         return R(err=GID_HINT)
     import re
 
-    m = re.search(r"(?:找工作|求职)\s*([^\s#/]+)?", event.message_str or "")
+    m = re.search(r"(?:找工作|求职)\s*([^\s#]+)?", event.message_str or "")
     want = (m.group(1) if m and m.group(1) else "").strip()
     return await career.find_job(
         ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config, want
@@ -114,9 +114,30 @@ async def comp_leave(ctx, event):
     )
 
 
+async def create_company_cmd(ctx, event):
+    gid = _gid(event)
+    if not gid:
+        return R(err=GID_HINT)
+    import re
+    m = re.search(r"^[#]?(?:创建公司|开公司|创业)\s*(\S+)", event.message_str or "")
+    comp_name = (m.group(1) if m else "").strip()
+    return await career.create_company(
+        ctx.db, gid, event.get_sender_id(), ctx.nick(event), comp_name, ctx.config
+    )
+
+
+async def company_dividend_cmd(ctx, event):
+    gid = _gid(event)
+    if not gid:
+        return R(err=GID_HINT)
+    return await career.company_dividend(
+        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+    )
+
+
 ROUTES = [
     Route(
-        r"^[#]?(找工作|求职)(\s*[^\s#/]+)?\s*$",
+        r"^[#]?(找工作|求职)(\s*[^\s#]+)?\s*$",
         "cmd_find_job",
         "投简历入职公司；可指定公司名，如：找工作 蓝色大厂",
         find_job,
@@ -146,6 +167,8 @@ ROUTES = [
         write_report,
     ),
     Route(r"^[#]?(晋升|升职)$", "cmd_promote", "晋升职级", promote),
-    Route(r"^[#](辞职|离职)$", "cmd_resign", "辞掉公司工作", resign_job),
+    Route(r"^[#]?(辞职|离职)$", "cmd_resign", "辞掉公司工作", resign_job),
     Route(r"^[#]?跳槽$", "cmd_hop", "跳槽换公司", job_hop),
+    Route(r"^[#]?(创建公司|开公司|创业)\s*\S+", "cmd_create_comp", "创业自建公司成为资本家老板", create_company_cmd),
+    Route(r"^[#]?(公司分红|领取分红|企业分红)$", "cmd_dividend", "作为公司老板提取企业利润分红", company_dividend_cmd),
 ]

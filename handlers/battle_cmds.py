@@ -21,7 +21,7 @@ async def duel(ctx, event):
     if not target:
         return R(err="格式：对线 @群友（或附QQ号）")
     return await social.duel(
-        ctx.db, gid, me, target, ctx.config, ctx.nick(event, target)
+        ctx.db, gid, me, target, ctx.config, ctx.nick(event, target), ctx.app_id
     )
 
 
@@ -44,7 +44,7 @@ async def rank_join(ctx, event):
 ROUTES = [
     Route(r"^[#]?对线", "cmd_duel", "与群友来一场职场对线，赢奖金涨身价", duel),
     Route(
-        r"^[#](卷王大赛|排位赛)$",
+        r"^[#]?(卷王大赛|排位赛)$",
         "cmd_rank_show",
         "查看自己的卷王大赛段位与积分",
         rank_show,

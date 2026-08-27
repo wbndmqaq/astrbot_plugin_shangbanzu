@@ -128,32 +128,33 @@ async def fund_sell(ctx, event):
 
 
 ROUTES = [
-    Route(r"^[#]存款\s*\d+", "cmd_deposit", "把钱存进银行吃利息", deposit),
+    Route(r"^[#]?存款\s*\d+", "cmd_deposit", "把钱存进银行吃利息", deposit),
     Route(
-        r"^[#](一键存款|全部存款)$", "cmd_deposit_all", "全部现金存入银行", deposit_all
+        r"^[#]?(一键存款|全部存款)$", "cmd_deposit_all", "全部现金存入银行", deposit_all
     ),
-    Route(r"^[#]取款\s*\d+", "cmd_withdraw", "从银行取款", withdraw),
+    Route(r"^[#]?取款\s*\d+", "cmd_withdraw", "从银行取款", withdraw),
     Route(
-        r"^[#](一键升级信用|升级信用)$",
+        r"^[#]?(一键升级信用|升级信用)$",
         "cmd_upgrade_credit",
         "升级信用等级提高存款上限",
         upgrade_credit,
     ),
     Route(
-        r"^[#](银行信息|我的银行|账户信息)$",
+        r"^[#]?(银行信息|我的银行|账户信息)$",
         "cmd_bank_info",
         "查看银行账户与基金持仓",
         bank_info,
     ),
-    Route(r"^[#]领取利息$", "cmd_interest", "领取存款利息", collect_interest),
-    Route(r"^[#]转账\s*\d+", "cmd_transfer", "向群友转账（收手续费）", transfer),
+    Route(r"^[#]?领取利息$", "cmd_interest", "领取存款利息", collect_interest),
+    Route(r"^[#]?转账\s*\d+", "cmd_transfer", "向群友转账（收手续费）", transfer),
     Route(
-        r"^[#]买基金\s*\d+", "cmd_fund_buy", "申购基金（每日自动结算涨跌）", fund_buy
+        r"^[#]?买基金\s*\d+", "cmd_fund_buy", "申购基金（每日自动结算涨跌）", fund_buy
     ),
     Route(
-        r"^[#]卖出基金(\s*\S+)?",
+        r"^[#]?卖出基金(\s*\S+)?",
         "cmd_fund_sell",
         "赎回基金，可带比例如：卖出基金 50%",
         fund_sell,
     ),
 ]
+

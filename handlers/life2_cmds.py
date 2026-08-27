@@ -99,8 +99,6 @@ async def pet_interact(ctx, event):
     gid = event.get_group_id() or ""
     if not gid:
         return R(err=GID)
-    pet = ctx.db.find_player_any(gid, event.get_sender_id())
-    pet.get("_pet") if pet else ""
     return await life2.pet_interact(
         ctx.db, gid, str(event.get_sender_id()), ctx.nick(event)
     )
@@ -112,7 +110,7 @@ async def get_cert(ctx, event):
         return R(err=GID)
     import re
 
-    m = re.search(r"(?:考证书|考证)\s+(\S+)", event.message_str or "")
+    m = re.search(r"(?:考证书|考证)\s*(\S+)", event.message_str or "")
     return await life2.get_cert(
         ctx.db,
         gid,
@@ -151,7 +149,7 @@ ROUTES = [
         "帮领导跑腿，有奖励有风险",
         boss_task,
     ),
-    Route(r"^[#/]?(行业峰会|峰会)$", "cmd_summit", "参加行业峰会，+经验+人脉", summit),
+    Route(r"^[#]?(行业峰会|峰会)$", "cmd_summit", "参加行业峰会，+经验+人脉", summit),
     Route(r"^[#]?(养猫|养狗)$", "cmd_adopt_pet", "领养宠物（猫或狗）", adopt_pet),
     Route(
         r"^[#]?(撸猫|遛狗|陪宠物)$",
@@ -160,7 +158,7 @@ ROUTES = [
         pet_interact,
     ),
     Route(
-        r"^[#]?考证书\s*\S+", "cmd_get_cert", "考行业证书（PMP/CPA/法考/CFA）", get_cert
+        r"^[#]?考证(书)?\s*\S+", "cmd_get_cert", "考行业证书（PMP/CPA/法考/CFA）", get_cert
     ),
-    Route(r"^[#/]?(旅游|出去旅游)$", "cmd_travel", "出去旅游，大幅恢复精神", travel),
+    Route(r"^[#]?(旅游|出去旅游)$", "cmd_travel", "出去旅游，大幅恢复精神", travel),
 ]

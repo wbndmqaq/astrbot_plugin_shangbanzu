@@ -117,14 +117,27 @@ def promote_rate(level_index: int, base: float, decay: float) -> float:
     return max(0.15, base - level_index * decay)
 
 
-def avatar_of(uid) -> str:
-    uid = str(uid)
-    return f"https://q1.qlogo.cn/g?b=qq&nk={uid}&s=160" if uid.isdigit() else ""
+def avatar_of(uid, app_id: str = "") -> str:
+    """生成头像 URL。
+
+    - OneBot (纯数字 QQ 号)：走 q1.qlogo.cn
+    - QQ 官方机器人 (32 位 openid / user_str 且包含 app_id)：走 q.qlogo.cn/qqapp/{app_id}/{user_str}/640
+    """
+    uid = str(uid).strip()
+    if not uid:
+        return ""
+    if uid.isdigit():
+        return f"https://q1.qlogo.cn/g?b=qq&nk={uid}&s=640"
+    if app_id:
+        return f"https://q.qlogo.cn/qqapp/{app_id}/{uid}/640"
+    return ""
 
 
 def display(p: dict) -> str:
-    """展示名优先级：群昵称(card) > 昵称 > 用户{id}"""
-    return p.get("card") or p.get("nickname") or f"用户{p.get('uid', '')}"
+    """展示名优先级：【称号】+ 群昵称(card) > 昵称 > 用户{id}"""
+    name = p.get("card") or p.get("nickname") or f"用户{p.get('uid', '')}"
+    title = p.get("title")
+    return f"【{title}】{name}" if title else name
 
 
 def pick(seq):

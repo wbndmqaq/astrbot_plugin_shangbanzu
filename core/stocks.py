@@ -150,6 +150,7 @@ class StockMarket:
     async def buy(
         self, gid, uid, key: str, amount_yuan: float, fee_rate: float
     ) -> dict | None:
+        """按金额买入。股票不存在/金额非法返回 None；余额不足抛 ValueError。"""
         await self.settle_if_needed()
         st = self.get_stock(key)
         if not st or amount_yuan <= 0:
@@ -160,6 +161,15 @@ class StockMarket:
         def _do():
             conn = self._conn()
             try:
+                # 原子扣款：余额不足时 rowcount=0
+                cur = conn.execute(
+                    "UPDATE players SET cash=round(cash-?,2) "
+                    "WHERE gid=? AND uid=? AND cash>=?",
+                    (amount_yuan, str(gid), str(uid), amount_yuan),
+                )
+                if cur.rowcount == 0:
+                    conn.rollback()
+                    return False
                 row = conn.execute(
                     "SELECT shares, cost FROM portfolio WHERE gid=? AND uid=? AND code=?",
                     (str(gid), str(uid), st["code"]),
@@ -177,15 +187,20 @@ class StockMarket:
                         (str(gid), str(uid), st["code"], shares, amount_yuan),
                     )
                 conn.commit()
+                return True
             finally:
                 conn.close()
 
-        await asyncio.to_thread(_do)
+        ok = await asyncio.to_thread(_do)
+        if not ok:
+            raise ValueError("现金不足")
         return {"stock": st, "shares": shares, "amount": amount_yuan, "fee": fee}
 
     async def sell(
         self, gid, uid, key: str, ratio: float, fee_rate: float
     ) -> dict | None:
+        if ratio <= 0:
+            return None
         await self.settle_if_needed()
         pos = await self.position_of(gid, uid, key)
         if not pos:
@@ -217,6 +232,11 @@ class StockMarket:
                         "UPDATE portfolio SET shares=?, cost=? WHERE gid=? AND uid=? AND code=?",
                         (remain, remain_cost, str(gid), str(uid), pos["code"]),
                     )
+                # 同事务入账到账金额
+                conn.execute(
+                    "UPDATE players SET cash=round(cash+?,2) WHERE gid=? AND uid=?",
+                    (income, str(gid), str(uid)),
+                )
                 conn.commit()
             finally:
                 conn.close()

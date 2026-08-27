@@ -102,6 +102,11 @@ setInterval(function(){var d=new Date(),p=function(n){return String(n).padStart(
   var el=document.getElementById("liveClock");
   if(el)el.textContent="🕐 "+p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds())},1000);
 
+/* ===== 实时动态：面板激活时每 10 秒自动刷新 ===== */
+setInterval(function(){
+  var p=document.getElementById("p-feed");
+  if(p&&p.classList.contains("on"))loadOverview()},10000);
+
 /* ===== 通用空状态 ===== */
 function emptyState(icon,text){return '<div class="empty-state"><div style="font-size:26px;margin-bottom:6px">'+icon+'</div><div>'+esc(text)+'</div></div>'}
 function skeletonRow(){return '<tr><td colspan="5"><div class="skeleton"></div></td></tr>'}
@@ -157,7 +162,7 @@ async function loadOverview(){try{
 async function loadGroups(){try{var g=await jget("/api/groups");
   var opts=(g.groups||[]).map(function(x){
     return '<option value="'+esc(x.gid)+'">'+esc(x.name||("群 "+x.gid))+'（'+x.count+'人）</option>'}).join("");;
-  ["groupSel","groupSel2","admGroupSel"].forEach(function(id){
+  ["groupSel","groupSel2","admGroupSel","playerGroupSel"].forEach(function(id){
     var el=document.getElementById(id);if(el)el.innerHTML=opts||'<option value="">暂无群数据</option>'});
 }catch(e){}}
 
@@ -699,6 +704,16 @@ async function delTxRow(i){
   if(!(await askConfirm("确定删除第 "+(i+1)+" 条数据？", {icon:"📝",title:"删除数据",yes:"确认删除"})))return;
   txData[curKey].splice(i,1);txDirty=true;renderTx();
 }
+async function saveTx(btn){
+  if(btn){btn.disabled=true;btn.textContent="保存中…"}
+  try{
+    var r=await jpost("/api/admin/json/save",{name:txName,data:txData});
+    txDirty=false;
+    toast("保存成功：已热更新 "+(r.keys||0)+" 组文案","ok");
+    loadTxFile();
+  }catch(e){toast("保存失败："+e.message,"error")}
+  finally{if(btn){btn.disabled=false;btn.textContent="💾 保存全部"}}
+}
 function addSub(path){
   var a=txGetP(txData,path);
   if(!Array.isArray(a))a=[];
@@ -723,6 +738,8 @@ async function loadPlayerList(page){
     plTotal=Math.ceil((r.total||0)/20);
     var info=document.getElementById("playerListInfo");
     if(info)info.textContent="共 "+(r.total||0)+" 位玩家";
+    var pageInfo=document.getElementById("pageInfo");
+    if(pageInfo)pageInfo.textContent="第 "+plPage+" / "+(plTotal||1)+" 页";
     var prev=document.getElementById("prevBtn");
     var next=document.getElementById("nextBtn");
     if(prev)prev.disabled=plPage<=1;

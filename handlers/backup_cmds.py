@@ -23,8 +23,8 @@ async def backup_create(ctx, event):
             "blocks": [
                 {"label": "备份名称", "value": info["name"]},
                 {"label": "大小", "value": f"{info['size'] // 1024} KB"},
-                {"label": "位置", "value": "plugin_data/backups/"},
-                {"label": "恢复方式", "value": f"恢复备份 {info['name'][:13]}"},
+                {"label": "位置", "value": "data/plugin_data/astrbot_plugin_shangbanzu/backups/"},
+                {"label": "恢复方式", "value": f"上班族恢复 {info['name'][:13]}"},
             ],
             "foot": "备份为 SQLite 在线快照，可在运行时安全创建",
         },
@@ -155,3 +155,4 @@ ROUTES = [
         backup_delete,
     ),
 ]
+

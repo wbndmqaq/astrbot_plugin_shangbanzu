@@ -23,7 +23,7 @@ desc: |
 
   ## 平台适配
   OneBot v11（aiocqhttp）与 QQ 官方机器人均已适配（仅使用文本/图片/@组件）。
-version: v1.0.0
+version: 1.0.0
 author: wbndm
 social_link: https://github.com/wbndmqaq
 repo: https://github.com/wbndmqaq/astrbot_plugin_shangbanzu

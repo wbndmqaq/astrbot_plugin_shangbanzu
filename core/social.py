@@ -9,7 +9,7 @@ from .career import _cd_left, _cd_set, _exempt, _load
 from .result import R
 
 
-async def market_list(db, gid):
+async def market_list(db, gid, app_id: str = ""):
     players = await asyncio.to_thread(db.all_players, gid)
     if not players:
         return R(err="本群还没有人入职任何公司，快发送「找工作」当第一个上班族")
@@ -26,7 +26,7 @@ async def market_list(db, gid):
                 "position": gd.position(int(pl["lvl"]))["title"],
                 "company": comp["name"] if comp else "无业",
                 "boss": logic.fmt_money(pl["salary"]) + " 元/月",
-                "avatar": logic.avatar_of(pl["uid"]),
+                "avatar": logic.avatar_of(pl["uid"], app_id),
             }
         )
     return R(
@@ -37,7 +37,7 @@ async def market_list(db, gid):
     )
 
 
-async def duel(db, gid, me, target, cfg, target_name=""):
+async def duel(db, gid, me, target, cfg, target_name="", app_id: str = ""):
     if str(target) == str(me):
         return R(err="自己跟自己对线？精神状态堪忧啊朋友")
     p = await _load(db, gid, me, "", cfg)
@@ -71,7 +71,8 @@ async def duel(db, gid, me, target, cfg, target_name=""):
 
     reward_rate = float(logic.cfg_get(cfg, "duel_reward_rate", 0.2))
     bonus_rate = float(logic.cfg_get(cfg, "duel_value_bonus_rate", 0.1))
-    reward = round(fee * reward_rate, 2) if win else 0.0
+    # 获胜：退还报名费并按报名费比例发放奖金，确保赢家净收益为正
+    reward = round(fee * (1 + reward_rate), 2) if win else 0.0
     net = round(reward - fee, 2)
     p["cash"] = round(float(p["cash"]) + net, 2)
     winner_p, loser_p = (p, td) if win else (td, p)
@@ -99,15 +100,18 @@ async def duel(db, gid, me, target, cfg, target_name=""):
     return R(
         tmpl="duel",
         data={
-            "a": {"name": my_name, "avatar": logic.avatar_of(me)},
-            "b": {"name": t_name, "avatar": logic.avatar_of(target)},
+            "a": {"name": my_name, "avatar": logic.avatar_of(me, app_id)},
+            "b": {"name": t_name, "avatar": logic.avatar_of(target, app_id)},
             "process": process,
             "win": win,
             "winner": w_name,
             "result_line": result_line,
             "blocks": [
                 {"label": "场地费", "value": f"-{fmt(fee)} 元"},
-                {"label": "奖金", "value": f"+{fmt(reward)} 元" if win else "颗粒无收"},
+                {
+                    "label": "奖金",
+                    "value": f"+{fmt(reward)} 元（含退还报名费）" if win else "颗粒无收",
+                },
                 {
                     "label": "净收益",
                     "value": ("+" if net >= 0 else "") + fmt(net) + " 元",
@@ -203,7 +207,7 @@ async def rank_join(db, gid, me, cfg, nickname=""):
     )
 
 
-async def rank_data(db, gid, kind):
+async def rank_data(db, gid, kind, app_id: str = ""):
     kind = kind if kind in ("wealth", "exp", "value", "level") else "wealth"
     titles = {
         "wealth": "富豪榜（总资产）",
@@ -238,7 +242,7 @@ async def rank_data(db, gid, kind):
                 "name": pl.get("card") or pl["nickname"] or f"用户{pl['uid']}",
                 "id": pl["uid"],
                 "score": score_val,
-                "avatar": logic.avatar_of(pl["uid"]),
+                "avatar": logic.avatar_of(pl["uid"], app_id),
             }
         )
     return R(

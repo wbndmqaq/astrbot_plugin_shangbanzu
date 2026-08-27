@@ -87,23 +87,26 @@ async def buy_stock(ctx, event):
         return R(err=GID_HINT)
     import re
 
-    m = re.search(r"(?:买股票|炒股)\s+(\S+)\s+(\d+)", event.message_str or "")
+    m = re.search(r"(?:买股票|买入|炒股)\s+(\S+)\s+(\d+)", event.message_str or "")
     if not m:
         return R(err="格式：买股票 <代码或名称> <金额>\n例如：买股票 sh600037 5000")
     me = str(event.get_sender_id())
     key, amt = m.group(1), int(m.group(2))
 
-    p = await ctx.db.get_player(gid, me, ctx.nick(event))
+    p = await asyncio.to_thread(ctx.db.get_player, gid, me, ctx.nick(event))
     fee_rate = float(ctx.c("stock_fee_rate", 0.005))
     if float(p["cash"]) < amt:
         return R(err=f"现金不足（当前 {_fmt(p['cash'])} 元）")
 
-    r = await ctx.star.market.buy(gid, me, key, float(amt), fee_rate)
+    try:
+        r = await ctx.star.market.buy(gid, me, key, float(amt), fee_rate)
+    except ValueError:
+        return R(err=f"现金不足（当前 {_fmt(p['cash'])} 元）")
     if r is None:
         return R(err=f"没有找到「{key}」这支股票，发送「股市」查看行情列表")
 
-    p["cash"] = round(float(p["cash"]) - amt, 2)
-    await asyncio.to_thread(ctx.db.save_player, p)
+    # 扣款已在市场事务内完成，这里只读最新余额用于展示
+    p = await asyncio.to_thread(ctx.db.get_player, gid, me)
     await asyncio.to_thread(
         ctx.db.add_transaction,
         gid,
@@ -144,12 +147,12 @@ async def sell_stock(ctx, event):
     import re
 
     m = re.search(
-        r"(?:卖股票|清仓)\s+(\S+?)(?:\s+(\d+)%)?\s*$",
+        r"(?:卖出|卖股票|清仓)\s+(\S+?)(?:\s+(\d+)%)?\s*$",
         event.message_str or "",
     )
     if not m:
         return R(
-            err="格式：卖股票 <代码或名称> [比例%]\n例如：卖出 sh600037 或 卖出 华晨通信 50"
+            err="格式：卖股票 <代码或名称> [比例%]\n例如：卖股票 sh600037 或 卖出 华晨通信 50"
         )
     me = str(event.get_sender_id())
     key = m.group(1)
@@ -162,26 +165,12 @@ async def sell_stock(ctx, event):
     if ratio <= 0 or ratio > 100:
         return R(err="卖出比例需在 1~100 之间")
 
-    income_before_fee = pos["market_value"] * ratio / 100
-    profit = (
-        income_before_fee
-        - (
-            pos["market_value"] / pos["cur_price"] * pos.get("avg_cost", 0)
-            if pos["cur_price"]
-            else 0
-        )
-        * ratio
-        / 100
-    )
-    del profit
-
     r = await ctx.star.market.sell(gid, me, key, ratio / 100.0, fee_rate)
     if r is None:
         return R(err="卖出失败：份额不足或已清仓")
 
+    # 入账已在市场事务内完成，这里只读最新余额用于展示
     p = await asyncio.to_thread(ctx.db.get_player, gid, me)
-    p["cash"] = round(float(p["cash"]) + r["income"], 2)
-    await asyncio.to_thread(ctx.db.save_player, p)
     await asyncio.to_thread(
         ctx.db.add_transaction,
         gid,
@@ -260,7 +249,7 @@ async def my_portfolio(ctx, event):
 
 ROUTES = [
     Route(
-        r"^[#]?(股市|大盘|行情)$",
+        r"^[#]?(股市|大盘|行情|股市行情)$",
         "cmd_market",
         "查看股市涨跌TOP10与市场概况",
         market_overview,
@@ -274,13 +263,15 @@ ROUTES = [
     Route(
         r"^[#]?(买股票|买入)\s+\S+\s+\d+",
         "cmd_buy_stock",
-        "按金额买入指定股票",
+        "按金额买入指定股票（买股票/买入均可）",
         buy_stock,
+        priority=1,
     ),
     Route(
-        r"^[#](卖股票|清仓)\s+\S+",
+        r"^[#]?(卖出|卖股票|清仓)\s+\S+",
         "cmd_sell_stock",
         "卖出股票，可带比例如「卖出 xx 50」",
         sell_stock,
+        priority=1,
     ),
 ]

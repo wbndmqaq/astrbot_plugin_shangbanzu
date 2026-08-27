@@ -38,27 +38,27 @@ body { font-family:"Microsoft YaHei","PingFang SC",sans-serif;
 <body>
   <div class="vs">
     <div class="fighter">
-      <div class="avwrap">{% if a.avatar %}<img src="{{ a.avatar }}">{% else %}<div class="avf">{{ a.name[:1] }}</div>{% endif %}</div>
-      <div class="nm">{{ a.name }}</div>
+      <div class="avwrap">{% if a and a.avatar %}<img src="{{ a.avatar }}">{% elif a and a.name %}<div class="avf">{{ a.name[:1] }}</div>{% else %}<div class="avf">?</div>{% endif %}</div>
+      <div class="nm">{{ a.name if a and a.name else '选手A' }}</div>
     </div>
     <div class="vstag">VS</div>
     <div class="fighter">
-      <div class="avwrap">{% if b.avatar %}<img src="{{ b.avatar }}">{% else %}<div class="avf">{{ b.name[:1] }}</div>{% endif %}</div>
-      <div class="nm">{{ b.name }}</div>
+      <div class="avwrap">{% if b and b.avatar %}<img src="{{ b.avatar }}">{% elif b and b.name %}<div class="avf">{{ b.name[:1] }}</div>{% else %}<div class="avf">?</div>{% endif %}</div>
+      <div class="nm">{{ b.name if b and b.name else '选手B' }}</div>
     </div>
   </div>
 
   <div class="process">
-    {% for l in process %}<div class="round">第{{ loop.index }}回合：{{ l }}</div>{% endfor %}
+    {% for l in process or [] %}<div class="round">第{{ loop.index }}回合：{{ l }}</div>{% endfor %}
   </div>
 
   <div class="result">
-    <h2>{% if win %}🏆 {{ winner }} 获胜！{% else %}💔 {{ winner }} 获胜（你输了）{% endif %}</h2>
-    <p>{{ result_line }}</p>
+    <h2>{% if win %}🏆 {{ winner or '胜利' }} 获胜！{% else %}💔 {{ winner or '对方' }} 获胜（你输了）{% endif %}</h2>
+    <p>{{ result_line or '' }}</p>
   </div>
 
   <div class="blocks">
-    {% for b in blocks %}
+    {% for b in blocks or [] %}
     <div class="kv"><div class="lab">{{ b.label }}</div><div class="val">{{ b.value }}</div></div>
     {% endfor %}
   </div>

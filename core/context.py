@@ -14,6 +14,11 @@ class GameCtx:
         self.db = db
         self.config = config
         self._card_cache = {}  # (gid, uid) -> (expire_ts, card)
+        self.umos = {}  # gid -> unified_msg_origin（推送用，指令触发时刷新）
+        self.app_id = ""  # QQ 官方机器人的 appid（用于拼接开放平台头像）
+
+    def avatar(self, uid) -> str:
+        return logic.avatar_of(uid, self.app_id)
 
     def c(self, key, default=None):
         return logic.cfg_get(self.config, key, default)
@@ -25,15 +30,27 @@ class GameCtx:
     def nick(self, event, uid=None):
         uid = str(uid) if uid else str(event.get_sender_id())
         name = ""
-        if uid == str(event.get_sender_id()):
+        # 1. 优先读本地数据库持久化拉取到的真实群名片/昵称
+        gid = event.get_group_id()
+        if gid:
+            p = self.db.find_player_any(gid, uid)
+            if p and p.get("card"):
+                return p["card"]
+            if p and p.get("nickname"):
+                name = p["nickname"]
+
+        # 2. 从消息事件中提取
+        if not name and uid == str(event.get_sender_id()):
             name = event.get_sender_name() or ""
+
+        # 3. 从 At 组件中提取
         if not name:
             for comp in event.get_messages():
                 if isinstance(comp, Comp.At) and str(comp.qq) == uid:
                     name = getattr(comp, "name", "") or ""
                     if name:
                         break
-        return name
+        return name or f"用户{uid}"
 
     @staticmethod
     def ats(event) -> list[str]:
@@ -74,15 +91,33 @@ class GameCtx:
         gid = event.get_group_id()
         if not gid:
             return
+        umo = getattr(event, "unified_msg_origin", None)
+        if umo:
+            self.umos[str(gid)] = umo
         bot = getattr(event, "bot", None)
         if bot is None:
             return
+
+        # 尝试提取 QQ 官方平台的 appid
+        appid = (
+            getattr(bot, "appid", None)
+            or getattr(bot, "bot_appid", None)
+            or getattr(bot, "client_id", None)
+        )
+        if not appid and hasattr(bot, "_http"):
+            appid = getattr(bot._http, "appid", None) or getattr(bot._http, "bot_appid", None)
+        if not appid and hasattr(bot, "api") and hasattr(bot.api, "_http"):
+            appid = getattr(bot.api._http, "appid", None) or getattr(bot.api._http, "bot_appid", None)
+        if appid:
+            self.app_id = str(appid)
 
         api = getattr(bot, "api", None)
         if hasattr(api, "call_action"):
             await self._refresh_card_onebot(event, gid, bot, extra_uids)
             return
-        http = getattr(api, "_http", None)
+
+        # 优先使用 bot.api 上的 _http，或 bot 自身绑定的 _http
+        http = getattr(api, "_http", None) or getattr(bot, "_http", None)
         if http is not None:
             await self._refresh_card_qqofficial(event, gid, http, extra_uids)
 
@@ -108,15 +143,7 @@ class GameCtx:
         import time as _t
 
         now = _t.time()
-        uids = [str(event.get_sender_id())]
-        for comp in event.get_messages():
-            if getattr(comp, "type", "") == "At":
-                qq = str(getattr(comp, "qq", ""))
-                if qq and qq != "all" and qq != str(event.get_self_id()):
-                    uids.append(qq)
-        for uid in extra_uids or ():
-            if uid:
-                uids.append(str(uid))
+        uids = await self._collect_uids(event, extra_uids)
 
         seen = set()
         for uid in uids:
@@ -127,21 +154,37 @@ class GameCtx:
             if uid in seen:
                 pass
             seen.add(uid)
-            try:
-                info = await bot.api.call_action(
-                    "get_group_member_info",
-                    group_id=int(gid),
-                    user_id=int(uid),
-                    no_cache=False,
-                )
-                card = (info.get("card") or "").strip()
-                if card:
-                    self._card_cache[key] = (now + 600, card)
-                    await asyncio.to_thread(self.db.set_card, gid, uid, card)
-                else:
-                    self._card_cache[key] = (now + 300, "")
-            except Exception:  # noqa: BLE001 - 拉取失败不影响指令执行
-                self._card_cache[key] = (now + 120, "")
+
+            # ---- 1. 群名片 (OneBot / aiocqhttp) ----
+            if str(gid).isdigit() and str(uid).isdigit():
+                try:
+                    info = await bot.api.call_action(
+                        "get_group_member_info",
+                        group_id=int(gid),
+                        user_id=int(uid),
+                        no_cache=False,
+                    )
+                    card = (info.get("card") or info.get("nickname") or "").strip()
+                    if card:
+                        self._card_cache[key] = (now + 600, card)
+                        await asyncio.to_thread(self.db.set_card, gid, uid, card)
+                        continue
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
+            # ---- 2. 群名片兜底 (OneBot get_group_name) ----
+            gkey = ("__grp__", str(gid))
+            if str(gid).isdigit() and not (self._card_cache.get(gkey) and self._card_cache[gkey][0] > now):
+                try:
+                    ginfo = await bot.api.call_action("get_group_info", group_id=int(gid), no_cache=False)
+                    gname = (ginfo.get("group_name") or "").strip()
+                    if gname:
+                        self._card_cache[gkey] = (now + 1800, gname)
+                        await asyncio.to_thread(self.db.set_group_name, gid, gname)
+                except Exception:  # noqa: BLE001
+                    self._card_cache[gkey] = (now + 600, "")
+
+            self._card_cache[key] = (now + 300, "")
 
     async def _refresh_card_qqofficial(self, event, gid, http, extra_uids):
         """QQ 官方平台：

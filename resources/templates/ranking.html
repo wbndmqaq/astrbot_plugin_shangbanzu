@@ -29,20 +29,22 @@ tr td:last-child { border-radius:0 9px 9px 0; }
 </style>
 </head>
 <body>
-  <h1>{{ title }}</h1>
+  <h1>{{ title or '排行榜' }}</h1>
   <table>
     <tbody>
-      {% for r in rows %}
+      {% for r in rows or [] %}
+      {% if r is mapping and r.name %}
       <tr>
-        <td class="rank">{% if r.rank == 1 %}🥇{% elif r.rank == 2 %}🥈{% elif r.rank == 3 %}🥉{% else %}{{ r.rank }}{% endif %}</td>
+        <td class="rank">{% if r.rank == 1 %}🥇{% elif r.rank == 2 %}🥈{% elif r.rank == 3 %}🥉{% else %}{{ r.rank or loop.index }}{% endif %}</td>
         <td>
           <div style="display:flex;align-items:center;gap:11px">
-            {% if r.avatar %}<img class="av" src="{{ r.avatar }}">{% else %}<div class="avf">{{ r.name[:1] }}</div>{% endif %}
-            <div><div class="pname">{{ r.name }}</div><div class="pid">{{ r.id }}</div></div>
+            {% if r.avatar %}<img class="av" src="{{ r.avatar }}">{% elif r.name %}<div class="avf">{{ r.name[:1] }}</div>{% else %}<div class="avf">?</div>{% endif %}
+            <div><div class="pname">{{ r.name }}</div><div class="pid">{{ r.id or '' }}</div></div>
           </div>
         </td>
-        <td class="score">{{ r.score }}</td>
+        <td class="score">{{ r.score or '' }}</td>
       </tr>
+      {% endif %}
       {% endfor %}
     </tbody>
   </table>

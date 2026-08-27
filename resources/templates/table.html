@@ -35,23 +35,27 @@ th { background:rgba(255,216,111,.10); color:#ffd86f; padding:9px 13px;
 <body>
   <div class="head">
     <div class="ico">{{ icon | default('📊') }}</div>
-    <h1>{{ title }}</h1>
+    <h1>{{ title or '数据统计' }}</h1>
   </div>
-  {% if summary %}
+  {% if summary and summary is iterable and summary is not string %}
   <div class="summary">
     {% for s in summary %}
+    {% if s is mapping %}
     <div class="stat"><div class="num">{{ s.value }}</div><div class="lab">{{ s.label }}</div></div>
+    {% endif %}
     {% endfor %}
   </div>
   {% endif %}
   <div class="tblbox">
     <table>
-      {% if cols %}<thead><tr>{% for c in cols %}<th>{{ c }}</th>{% endfor %}</tr></thead>{% endif %}
+      {% if cols %}<thead style="display:table-header-group"><tr>{% for c in cols %}<th>{{ c }}</th>{% endfor %}</tr></thead>{% endif %}
       <tbody>
-        {% for r in rows %}
+        {% for r in rows or [] %}
+        {% if r is mapping and r.cells %}
         <tr class="{% if r.fail %}fail{% else %}ok{% endif %}">
           {% for c in r.cells %}<td>{{ c }}</td>{% endfor %}
         </tr>
+        {% endif %}
         {% endfor %}
       </tbody>
     </table>

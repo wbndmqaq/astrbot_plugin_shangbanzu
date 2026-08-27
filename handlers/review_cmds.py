@@ -15,7 +15,7 @@ async def annual_review(ctx, event):
 
 ROUTES = [
     Route(
-        r"^[#/]?(年终考评|年度考评|考评)$",
+        r"^[#]?(年终考评|年度考评|考评|年终总结)$",
         "cmd_annual_review",
         "年度绩效考评，S/A/B/C/D五档影响年终奖和调薪",
         annual_review,

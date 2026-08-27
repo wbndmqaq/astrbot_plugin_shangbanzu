@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star
 
 try:
@@ -51,7 +51,7 @@ except ImportError:  # 兼容以文件方式直接加载的旧版内核
     from webui.server import WebUIServer
 
 PLUGIN_NAME = "astrbot_plugin_shangbanzu"
-VERSION = "v1.0.0"
+VERSION = "1.0.0"
 
 
 class Shangbanzu(Star):
@@ -133,16 +133,86 @@ class Shangbanzu(Star):
             logger.warning(f"[上班族物语] 渲染器关闭异常（已忽略）：{e}")
 
     async def _push_loop(self):
+        """定时任务：到点后向开启推送的群发送每日早报，并做每周排行归档。"""
         while True:
             try:
                 await asyncio.sleep(600)
-                enabled_groups = self.db.push_group_ids()
-                for gid in enabled_groups:
-                    pass  # 推送逻辑由 handlers/push_cmds.py 的定时触发实现
+                lt = time.localtime()
+                if lt.tm_hour < int(logic.cfg_get(self.config, "push_hour", 8)):
+                    continue
+                if bool(logic.cfg_get(self.config, "weekly_archive_enabled", True)):
+                    try:
+                        await asyncio.to_thread(self._weekly_archive)
+                    except Exception as e:  # noqa: BLE001 - 归档失败不影响推送
+                        logger.warning(f"[上班族物语] 每周归档失败：{e}")
+                await self._daily_push()
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # noqa: BLE001
                 logger.error(f"[上班族物语] 推送循环异常：{e}")
+
+    async def _daily_push(self):
+        today = logic.today_str()
+        for gid in await asyncio.to_thread(self.db.push_group_ids):
+            gid = str(gid)
+            umo = self.ctx.umos.get(gid)
+            if not umo:
+                continue  # 本轮未见过该群消息，无法定位会话
+            if await asyncio.to_thread(self.db.push_last_date, gid) == today:
+                continue
+            text = await asyncio.to_thread(self._daily_report_text, gid)
+            try:
+                await self.context.send_message(umo, MessageChain().message(text))
+                await asyncio.to_thread(self.db.mark_pushed, gid, today)
+            except Exception as e:  # noqa: BLE001 - 单群失败不阻断其他群
+                logger.warning(f"[上班族物语] 推送失败（{gid}）：{e}")
+
+    def _daily_report_text(self, gid) -> str:
+        lines = [f"📰 今日职场早报：{gd.news_of_day() or '暂无'}"]
+        try:
+            stocks = self.market.list_stocks(100)
+            ups = sorted(
+                (s for s in stocks if s["chg"] > 0), key=lambda s: -s["chg"]
+            )[:3]
+            downs = sorted(
+                (s for s in stocks if s["chg"] < 0), key=lambda s: s["chg"]
+            )[:3]
+            if ups:
+                lines.append(
+                    "📈 领涨："
+                    + " ".join(f"{s['name']} +{s['chg']}%" for s in ups)
+                )
+            if downs:
+                lines.append(
+                    "📉 领跌：" + " ".join(f"{s['name']} {s['chg']}%" for s in downs)
+                )
+        except Exception:  # noqa: BLE001, S110 - 股市摘要失败仅省略该段
+            pass
+        lines.append("（发送「推送」可开关本群推送）")
+        return "\n".join(lines)
+
+    def _weekly_archive(self):
+        """每周首次触发时，把上一周各群的财富榜快照写入 archives。"""
+        y, w = logic.iso_week()
+        prev = (y, w - 1) if w > 1 else (y - 1, 52)
+        if self.db.max_archived_week() == prev:
+            return
+        for gid, _n in self.db.group_ids():
+            top = self.db.top_wealth(gid, 10)
+            if not top:
+                continue
+            payload = {
+                "week": f"{prev[0]}-W{prev[1]:02d}",
+                "top": [
+                    {
+                        "name": logic.display(p),
+                        "total": p.get("total", 0),
+                        "level": p.get("lvl", 1),
+                    }
+                    for p in top
+                ],
+            }
+            self.db.save_archive(gid, prev[0], prev[1], payload)
 
     # ------------------------------------------------------------------
     # 输出渲染（独立 Playwright 渲染器，失败回退纯文本）

@@ -68,13 +68,13 @@ async def checkup(ctx, event):
 ROUTES = [
     Route(r"^[#]?(年会抽奖|年会)$", "cmd_party", "年会抽奖（每年限一次）", party),
     Route(r"^[#]?借钱\s+\S+", "cmd_lend", "借钱 @群友 N（可能收不回来）", lend),
-    Route(r"^[#/]?(职场建议|建议)$", "cmd_advice", "随机职场生存建议", advice),
+    Route(r"^[#]?(职场建议|建议)$", "cmd_advice", "随机职场生存建议", advice),
     Route(
-        r"^[#/]?(工位升级|升级工位)$",
+        r"^[#]?(工位升级|升级工位)$",
         "cmd_workstation",
         "升级工位提高摸鱼舒适度",
         workstation,
     ),
-    Route(r"^[#/]?(加班餐|加班饭)$", "cmd_ot_meal", "加班餐补贴（一天一次）", ot_meal),
-    Route(r"^[#/]?(年度体检|体检)$", "cmd_checkup", "年度体检，可能查出问题", checkup),
+    Route(r"^[#]?(加班餐|加班饭)$", "cmd_ot_meal", "加班餐补贴（一天一次）", ot_meal),
+    Route(r"^[#]?(年度体检|体检)$", "cmd_checkup", "年度体检，可能查出问题", checkup),
 ]

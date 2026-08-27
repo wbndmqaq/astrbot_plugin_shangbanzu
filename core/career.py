@@ -4,6 +4,7 @@ import asyncio
 import random
 import time
 
+from . import db as db_module
 from . import gamedata as gd
 from . import logic
 from .result import R
@@ -44,6 +45,9 @@ async def find_job(db, gid, uid, nickname, cfg, want: str = ""):
 
     eligible = [c for c in gd.companies() if c["min_exp"] <= int(p["exp"])]
     want = (want or "").strip()
+
+    if want == "" and not eligible:
+        return R(err="你当前的经验还投不了任何公司，先加班攒攒经验吧")
 
     if want:
         target = None
@@ -310,7 +314,28 @@ async def slack(db, gid, uid, nickname, cfg):
         )
     _cd_set(p, "slack", cd)
 
-    if random.random() < 0.15:
+    cds = p.setdefault("_cds", {})
+    shield = cds.pop("shield_active", None)
+    poop = cds.pop("poop_active", None)
+
+    caught_prob = 0.0 if poop else 0.15
+    if random.random() < caught_prob:
+        if shield:
+            await asyncio.to_thread(db.save_player, p)
+            return R(
+                tmpl="panel",
+                data={
+                    "icon": "🛡️",
+                    "title": "摸鱼被抓 · 护盾生效！",
+                    "accent": "#ffd86f",
+                    "lines": ["HR 突然巡视，你装配的【防甩锅护盾】瞬间抵挡了一切罚款！"],
+                    "blocks": [
+                        {"label": "护盾状态", "value": "已消耗 1 层"},
+                        {"label": "罚款减免", "value": "100%"},
+                    ],
+                },
+                text="摸鱼被抓！但你的【防甩锅护盾】生效，免除了罚款！",
+            )
         fine = max(10.0, round(float(p["salary"]) / 22 * 0.5, 2))
         p["cash"] = round(max(0.0, float(p["cash"]) - fine), 2)
         p["mind"] = float(p["mind"]) - 5
@@ -324,13 +349,16 @@ async def slack(db, gid, uid, nickname, cfg):
                 "title": "摸鱼被抓！",
                 "accent": "#fc6262",
                 "lines": [line],
-                "blocks": [{"label": "罚款", "value": f"-{logic.fmt_money(fine)} 元"}],
-                "foot": f"精神 {p['mind']} / 100",
+                "blocks": [
+                    {"label": "罚款", "value": f"-{logic.fmt_money(fine)} 元"},
+                    {"label": "精神", "value": f"-5（当前 {p['mind']}）"},
+                    {"label": "现金", "value": f"{logic.fmt_money(p['cash'])} 元"},
+                ],
             },
             text=f"摸鱼被抓！罚款 {logic.fmt_money(fine)} 元：{line}",
         )
 
-    gain = logic.ri(8, 15)
+    gain = (logic.ri(8, 15) * 2) if poop else logic.ri(8, 15)
     p["mind"] = round(float(p["mind"]) + gain, 1)
     p["exp"] = int(p["exp"]) + logic.ri(0, 1)
     _clamp_status(p)
@@ -363,7 +391,9 @@ async def overtime(db, gid, uid, nickname, cfg):
     _cd_set(p, "ot", cd)
 
     ev = logic.pick(gd.t("work", "overtime_events"))
-    pay = round(float(p["salary"]) / 22 * logic.rf(0.5, 1.1), 2)
+    # 技能加成：每掌握一门技能，加班收益 +2%
+    skill_bonus = 1 + 0.02 * len(p.get("_skills", []) or [])
+    pay = round(float(p["salary"]) / 22 * logic.rf(0.5, 1.1) * skill_bonus, 2)
     p["cash"] = round(float(p["cash"]) + pay, 2)
     p["total_earned"] = round(float(p.get("total_earned") or 0) + pay, 2)
     p["health"] = float(p["health"]) + ev.get("health", -8)
@@ -496,6 +526,8 @@ async def promote(db, gid, uid, nickname, cfg):
         float(logic.cfg_get(cfg, "promote_base_rate", 0.85)),
         float(logic.cfg_get(cfg, "promote_decay", 0.06)),
     )
+    # 技能加成：每掌握一门技能，晋升成功率 +3%（上限 95%）
+    rate = min(0.95, rate + 0.03 * len(p.get("_skills", []) or []))
     comp = gd.company_by_id(int(p["company"]))
     if random.random() < rate:
         p["lvl"] = int(p["lvl"]) + 1
@@ -839,6 +871,7 @@ async def negotiate_salary(db, gid, uid, nickname, cfg):
 async def my_company(db, gid, uid, nickname, cfg):
     """查看当前雇主公司详情。"""
     p = await _load(db, gid, uid, nickname, cfg)
+    n_comp = len(gd.companies())
     if int(p["company"]) == -1:
         return R(
             tmpl="panel",
@@ -847,12 +880,12 @@ async def my_company(db, gid, uid, nickname, cfg):
                 "title": "你目前处于失业状态",
                 "accent": "#fc6262",
                 "lines": [
-                    "插件里有 19 家公司在招人：从快餐店到宇宙大厂。",
+                    f"插件里有 {n_comp} 家公司在招人：从快餐店到宇宙大厂。",
                     "经验越高，能面进门槛越高的公司，月薪也越高。",
                 ],
                 "foot": "发送「找工作」投递简历；发送「我的简历」查看自身条件",
             },
-            text="你目前失业中。发送「找工作」开始求职（19 家公司可选，门槛看经验）",
+            text=f"你目前失业中。发送「找工作」开始求职（{n_comp} 家公司可选，门槛看经验）",
         )
 
     comp = gd.company_by_id(int(p["company"]))
@@ -921,3 +954,128 @@ async def my_company(db, gid, uid, nickname, cfg):
             f"{'今日已打卡' if checked else '今日未打卡'}"
         ),
     )
+
+
+async def create_company(db, gid, uid, nickname, comp_name, cfg):
+    """创业自建公司：身价达标且消耗启动资金。"""
+    p = await _load(db, gid, uid, nickname, cfg)
+    comp_name = (comp_name or "").strip()
+    if not comp_name:
+        return R(err="请输入公司名称，例如：「创建公司 赛博科技」或「创业 星芒游戏」")
+    if len(comp_name) > 15:
+        return R(err="公司名称过长（最多15个字）")
+
+    # 检查是否已是老板或已有公司
+    def _check_company():
+        conn = db._conn()
+        try:
+            return conn.execute("SELECT * FROM custom_companies WHERE gid=? AND boss_uid=?", (str(gid), str(uid))).fetchone()
+        finally:
+            conn.close()
+
+    row = await asyncio.to_thread(_check_company)
+
+    if row:
+        return R(err=f"你已经创立了公司「{row['name']}」，当老板要有定力！发送「公司分红」领取利润")
+
+    # 门槛：职级 >= 10 (VP/合伙人) 或 身价 >= min_val，且启动资金 cost 元
+    cost = float(logic.cfg_get(cfg, "create_company_cost", 30000.0))
+    min_val = float(logic.cfg_get(cfg, "create_company_min_value", 50000.0))
+    if int(p["lvl"]) < 10 and float(p["value"]) < min_val:
+        return R(err=f"创业门槛极高！需要职级达到 VP/合伙人，或职场身价超过 {logic.fmt_money(min_val)} 元，打铁还需自身硬！")
+    if float(p["cash"]) < cost:
+        return R(err=f"注册公司需要 {logic.fmt_money(cost)} 元启动验资资金，当前现金不足")
+
+    p["cash"] = round(float(p["cash"]) - cost, 2)
+    p["value"] = round(float(p["value"]) + 20000.0, 2)
+    await asyncio.to_thread(db.save_player, p)
+    await asyncio.to_thread(db.add_transaction, gid, uid, "创业注册资金", -cost, f"创立公司 {comp_name}")
+
+    def _insert_company():
+        with db_module._write_lock:
+            conn = db._conn()
+            try:
+                conn.execute(
+                    "INSERT INTO custom_companies (gid, boss_uid, name, tag, salary, balance, created_at) VALUES (?,?,?,?,?,?,?)",
+                    (str(gid), str(uid), comp_name, "自建企业", 6000.0, 10000.0, int(time.time()))
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    await asyncio.to_thread(_insert_company)
+
+    await asyncio.to_thread(
+        db.add_event, gid, uid, "创业", f"{p['nickname'] or uid} 豪掷千金创立了「{comp_name}」，正式晋升为资本家/大老板！"
+    )
+    return R(
+        tmpl="panel",
+        data={
+            "icon": "👑",
+            "title": "🎉 创业成功 · 公司成立！",
+            "accent": "#ffd86f",
+            "lines": [
+                f"恭喜 {p['nickname'] or uid} 晋升为大老板！「{comp_name}」正式开门营业！",
+                "群内员工每次打卡都将为公司带来利润，发送「公司分红」即可提取企业营收分红！",
+            ],
+            "blocks": [
+                {"label": "公司名称", "value": comp_name},
+                {"label": "注册资金", "value": f"-{logic.fmt_money(cost)} 元"},
+                {"label": "身价暴涨", "value": f"+20,000 (当前 {logic.fmt_money(p['value'])})"},
+                {"label": "企业金库", "value": "10,000.00 元"},
+            ],
+            "foot": "老板指令：发送「公司分红」提现；群友可「找工作」投递入职",
+        },
+        text=f"👑 恭喜创业成功！你创立了「{comp_name}」，身价暴涨 20,000 元！",
+    )
+
+
+async def company_dividend(db, gid, uid, nickname, cfg):
+    """老板提取公司利润分红。"""
+    p = await _load(db, gid, uid, nickname, cfg)
+    
+    def _do_dividend():
+        with db_module._write_lock:
+            conn = db._conn()
+            try:
+                row = conn.execute("SELECT * FROM custom_companies WHERE gid=? AND boss_uid=?", (str(gid), str(uid))).fetchone()
+                if not row:
+                    return None, "not_boss"
+                balance = float(row["balance"] or 0)
+                if balance <= 0:
+                    return dict(row), "zero_balance"
+                conn.execute("UPDATE custom_companies SET balance=0 WHERE id=?", (row["id"],))
+                conn.commit()
+                return (dict(row), balance), "ok"
+            finally:
+                conn.close()
+
+    res, status = await asyncio.to_thread(_do_dividend)
+    if status == "not_boss":
+        return R(err="你还不是老板，发送「创建公司 公司名」开启创业当老板！")
+    if status == "zero_balance":
+        return R(err=f"公司「{res['name']}」金库暂无可分红资金，员工努力搬砖中...")
+
+    row_data, dividend = res
+    p["cash"] = round(float(p["cash"]) + dividend, 2)
+    p["total_earned"] = round(float(p.get("total_earned") or 0) + dividend, 2)
+    await asyncio.to_thread(db.save_player, p)
+    await asyncio.to_thread(db.add_transaction, gid, uid, "企业分红", dividend, f"来自 {row_data['name']}")
+
+    return R(
+        tmpl="panel",
+        data={
+            "icon": "💰",
+            "title": f"企业分红到账 · {row_data['name']}",
+            "accent": "#6fe08c",
+            "lines": [f"公司运营良好，本次分红 {logic.fmt_money(dividend)} 元已存入个人现金！"],
+            "blocks": [
+                {"label": "分红金额", "value": f"+{logic.fmt_money(dividend)} 元"},
+                {"label": "当前现金", "value": f"{logic.fmt_money(p['cash'])} 元"},
+                {"label": "金库剩余", "value": "0.00 元"},
+            ],
+            "foot": "资本家的快乐就是这么简单朴素",
+        },
+        text=f"💰 公司分红成功！已提现 {logic.fmt_money(dividend)} 元至个人现金！",
+    )
+
