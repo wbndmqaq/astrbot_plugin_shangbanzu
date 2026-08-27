@@ -225,7 +225,7 @@ QQ 群（插件讨论）：[点击加入](https://qm.qq.com/q/8sOZdZTnaw)
 
 ## 🗂️ 自定义扩充文案（欢迎PR文案）
 
-所有事件文案均位于 `resources/texts/*.json`：
+所有事件文案均位于 `resources/*/*.json`：
 - `work.json`：打卡、摸鱼、加班、辞职、周报文案；
 - `life.json`：吃饭、午休、健身、租房、购物文案；
 - `duel.json`：对线撕逼与卷王对决台词；
