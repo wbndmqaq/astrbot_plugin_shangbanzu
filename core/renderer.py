@@ -55,7 +55,11 @@ class PlaywrightRenderer:
                     self._seq += 1
                     fname = f"{name or 'shot'}_{self._seq}_{int(time.time())}.png"
                     out = self.shot_dir / fname
-                    await page.screenshot(path=str(out), full_page=True)
+                    body = await page.query_selector("body")
+                    if body:
+                        await body.screenshot(path=str(out))
+                    else:
+                        await page.screenshot(path=str(out), full_page=True)
                 finally:
                     await page.close()
                 self._cleanup()
