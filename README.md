@@ -1,4 +1,8 @@
-# 🏢 打工人 · 上班族物语
+<p align="center">  
+  <img src="logo.png" width="120" alt="logo">
+</p>
+
+<h1 align="center">🏢 打工人 · 上班族物语</h1>
 
 AstrBot 大型群聊职场生存模拟插件。
 AstrBot 大型群聊职场生存模拟插件。以「上班族的现实」为主题：入职公司、每日打卡领薪
@@ -274,6 +278,13 @@ QQ 群（插件讨论）：[点击加入](https://qm.qq.com/q/8sOZdZTnaw)
 ---
 
 欢迎提交 PR 补充或丰富插件的创意文案与企业！
+
+---
+
+## 致谢
+
+- [肉辣胖](https://ti.qq.com/open_qq/index2.html?url=mqqapi%3a%2f%2fuserprofile%2ffriend_profile_card%3fsrc_type%3dweb%26version%3d1.0%26source%3d2%26uin%3d3279524507) — 感谢这个群友画的logo
+- [AstrBot](https://github.com/AstrBotDevs/AstrBot) — 多平台聊天机器人框架
 
 ---
 
