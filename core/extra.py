@@ -9,7 +9,18 @@ from . import gamedata as gd
 from . import logic
 from .result import R
 
-SKILL_LIST = ["编程", "设计", "管理", "演讲", "外语"]
+
+def _load_skills():
+    """从 JSON 文件加载技能列表"""
+    try:
+        from . import gamedata as gd
+        return list(gd.skills().keys())
+    except Exception:
+        # 兜底：如果文件不存在或解析失败，使用硬编码列表
+        return ["编程", "设计", "管理", "演讲", "外语"]
+
+
+SKILL_LIST = _load_skills()
 
 
 def _skills(p):
