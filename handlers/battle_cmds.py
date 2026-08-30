@@ -10,7 +10,9 @@ async def duel(ctx, event):
     if not gid:
         return R(err=GID_HINT)
     me = str(event.get_sender_id())
-    candidates = ctx.nums(event, ("对线",)) + ctx.ats(event)
+    # @ 目标优先于裸数字，避免「对线 12345 @B」时数字 12345 抢占目标
+    ats = ctx.ats(event)
+    candidates = list(ats) + [c for c in ctx.nums(event, ("对线",)) if c not in ats]
     target = next((c for c in candidates if c != me), "")
     if not target:
         return R(err="格式：对线 @群友（或附QQ号）")

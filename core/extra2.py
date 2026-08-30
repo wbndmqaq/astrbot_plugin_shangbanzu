@@ -242,10 +242,11 @@ async def health_checkup(db, gid, uid, nickname, cfg):
     year = time.strftime("%Y")
     if p.get("checkup_year") == year:
         return R(err="今年的年度体检已经做过了")
-    p["checkup_year"] = year
     cost = float(logic.cfg_get(cfg, "checkup_cost", 200.0))
     if float(p["cash"]) < cost:
         return R(err=f"体检需要 {logic.fmt_money(cost)} 元，余额不足")
+    # 余额够才标记本年已检：否则钱不够会被白锁一年
+    p["checkup_year"] = year
     p["cash"] = round(max(0.0, float(p["cash"]) - cost), 2)
     if random.random() < float(logic.cfg_get(cfg, "checkup_ok_rate", 0.55)):
         line = logic.pick(gd.t("extra2", "checkup_ok"))

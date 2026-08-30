@@ -20,15 +20,17 @@ async def lend(ctx, event):
         return R(err=GID_HINT)
     me = str(event.get_sender_id())
     ats = ctx.ats(event)
-    nums = ctx.nums(event, ("借钱", "借"))
     if ats:
-        target, amount = ats[0], (nums[0] if nums else "0")
-    elif len(nums) >= 2:
-        # 无 @ 时必须「ID + 金额」两个数字，否则「借钱 12345」会把同一个
-        # token 既当收款人又当金额，变成给用户 12345 借 12345 元
-        target, amount = nums[0], nums[1]
+        # 有 @ 时先剔除收款人 QQ，避免适配器把 @ 渲染成数字文本后把 QQ 号当金额
+        target, amount = ats[0], ctx.amount_after(event, ("借钱", "借"), (ats[0],))
     else:
-        return R(err="请@要借钱的群友，如：借钱 @群友 500（或「借钱 12345678 500」）")
+        nums = ctx.nums(event, ("借钱", "借"))
+        if len(nums) >= 2:
+            # 无 @ 时必须「ID + 金额」两个数字，否则「借钱 12345」会把同一个
+            # token 既当收款人又当金额，变成给用户 12345 借 12345 元
+            target, amount = nums[0], nums[1]
+        else:
+            return R(err="请@要借钱的群友，如：借钱 @群友 500（或「借钱 12345678 500」）")
     return await extra2.lend_money(
         ctx.db, gid, me, target, amount, ctx.config, await ctx.anick(event, target)
     )

@@ -59,6 +59,8 @@ async def bring_food(ctx_db, gid, me, target, nickname, cfg, target_name=""):
     if not td:
         return R(err="对方还没有加入游戏（让 TA 先发一次「上班」），帮不上")
     target = td["uid"]
+    if str(target) == str(me):
+        return R(err="给自己带饭？那叫自己带饭，不叫帮同事带饭")
     p["cash"] = round(max(0.0, float(p["cash"]) - cost), 2)
     p["social_pts"] = int(p.get("social_pts") or 0) + 2
     await asyncio.to_thread(ctx_db.save_player, p)
@@ -156,6 +158,8 @@ async def eat_with(ctx_db, gid, me, target, nickname, cfg, target_name=""):
     if not td:
         return R(err="对方还没有加入游戏（让 TA 先发一次「上班」），约不了饭")
     target = td["uid"]
+    if str(target) == str(me):
+        return R(err="和自己吃饭？那叫干饭，不叫和同事吃饭")
     if float(p["cash"]) < cost:
         return R(err=f"吃饭预计 {logic.fmt_money(cost)} 元，余额不足")
     p["cash"] = round(max(0.0, float(p["cash"]) - cost), 2)

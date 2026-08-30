@@ -266,7 +266,7 @@ QQ 群（插件讨论）：[点击加入](https://qm.qq.com/q/8sOZdZTnaw)
 | **`rankevents.json`** | 卷王挑战事件 + 段位表：`events[25]`（`name`/`effect`/`desc`）+ `opponents[12]` + `tiers[5]` + `tier_scores[5]` |
 | **`workstations.json`** | 5 档工位：`lv`（0~4）、`name`、`cost`、`bonus`、`desc` |
 | **`pets.json`** | 宠物（猫/狗）：`type`、`cost`、`mind_bonus`、`desc` |
-| **`meals.json`** | 吃饭三档（外卖 / 食堂 / 大餐）：`name`、`key`、`cost`、`health`、`mind`。配合配置项 `shopping_budgets` / `shopping_weights` / `shopping_refund_rate` / `shopping_deal_rate` 调价与触发 |
+| **`meals.json`** | 吃饭三档（外卖 / 食堂 / 大餐）：`name`、`key`、`cost`、`health`、`mind` |
 | **`commute.json`** | 4 种通勤方式：`name`、`cost`、`health`、`mind`、`late_rate`。配合配置项 `overtime_meal_start_hour`、`late_pay_penalty_rate` 等 |
 | **`certs.json`** | 4 种证书（PMP / CPA / 法考 / CFA）：`name`、`cost`、`exp`。配合 `cert_pass_rate` / `cert_value_bonus_rate` 调难度与回报 |
 | **`scratch.json`** | 下班刮刮乐：`prizes[4]`（`name`/`multiplier`/`prob`/`color`，金额按「相对售价的倍数」存储）+ `lose`（未中奖文案）。配合配置项 `scratch_lottery_cost` / `scratch_rtp` 调售价与返奖率（变更售价不会破坏返奖率） |

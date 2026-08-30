@@ -224,7 +224,8 @@ async def rank_join(db, gid, me, cfg, nickname=""):
     p["rank_score"] = max(0, int(p["rank_score"]) + diff)
     p["rank_matches"] = int(p["rank_matches"]) + 1
     p["rank_tier"] = logic.tier_of(p["rank_score"])
-    reward = int(abs(diff) * float(logic.cfg_get(cfg, "rank_reward_rate", 0.1)))
+    # 只对胜利发奖金：此前输了也按积分差发钱，等于人人都有稳定出场费
+    reward = int(abs(diff) * float(logic.cfg_get(cfg, "rank_reward_rate", 0.1))) if win else 0
     p["cash"] = round(float(p["cash"]) + reward, 2)
     logic.cd_set(p, "rank", cooldown)
     await asyncio.to_thread(db.save_player, p)

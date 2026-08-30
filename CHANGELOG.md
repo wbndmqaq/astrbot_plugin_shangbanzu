@@ -1,41 +1,4 @@
-﻿# 更新日志
-
-## 1.0.2 (2026-08-30)
-
-### 🐛 Bug 修复（与并发/资金相关，全部 P0/P1）
-
-- **`save_player` 并发吞并**：`_save_delta` 对 `cash/mind/value/total_earned` 的 SQL 用 `MIN/MAX` 包裹当前列值，会与 atomic 列更新（红包领取 / 对线结算 / 彩票派奖）并发时把别人刚入账的钱吞到 0；改为「delta 仅参与累加，钳制只防溢出」。修复后玩家资金不再被并发指令互相抹平。
-- **孤儿奖池丢失**：开奖日但无人购票时 `lottery_pool` 行无人结算、永不滚存，资金永久锁死；新增 `lottery_carry_unsettled_pool` 由推送循环兜底把池余额滚到次日。
-- **发红包非原子**：`try_debit_cash` + `create_redpacket` 两条独立调用之间崩溃会留下「钱扣了红包没建」孤儿资金；新增 `create_redpacket_atomic` 单事务扣款+建包。
-- **彩票奖池 double-count 风险**：`lottery_pool_add` 的 `INSERT VALUES` 占位用 `amount`，将来加入「0 点预占行」逻辑会被双倍计入；改为显式 `VALUES (..., 0)`。
-- **股票持仓只数并发超限**：`stocks.buy` 的「先查后插」在两次并发同 code 买时会让 portfolio 越过 `stock_max_positions`；改为单条 `INSERT WHERE (SELECT COUNT…) < ?` 条件插入。
-- **午休 CD 过零点边界**：`86400 - secs_passed` 在 23:59:30 时只剩 30 秒，跨日时立即可再午休；改为 `secs_to_midnight + 60`，新一天零点之后才有新 CD。
-- **临时密码尾字符为 `-`**：`random_password` 在 length=18 时 `chunk[:18]` 可能落到 `-`；截断后再剔除末尾 `-`。
-- **WebUI `_host_ok` 绕过**：原本允许所有裸 IP Host 头，可绕过 `webui_host=0.0.0.0 + 无密码`部署；收紧到只放行配置项与回环名。
-- **帮助页指令数**：用 `len(ALL_ROUTES)` 替换对 `help.json` 文案数的统计，与 README/CHANGELOG 宣称的 93 条对齐。
-- **团建/基金/商店兜底**：`team_building` 文案缺字段时 `int(None)` 改为 `max(0,..)` 钳制；`shop_buy` 子串匹配多结果时返回候选列表而非「找不到」；`fund_sell` 移除不可达的 `IndexError except`。
-
-### 🧹 清理与文档
-
-- 删除 `core/life.py:HOUSE_KEYS`（与 `houses.json` 重复），租房别名改为按 `houses.json` 子串匹配。
-- 副业等级称号表迁移至 `resources/data/workstations.json` 的 `side_hustle_titles`，不再硬编码。
-- README 区分「卷王榜 = 经验值 exp」与「卷王大赛 = ELO 积分」是两套独立数值。
-- README 区分「学技能」（编程/设计/管理/演讲/外语）与「考证」（PMP/CPA/法考/CFA）的玩法差异。
-- Jinja2 模板编译缓存（`renderer._tmpl_cache`），WebUI 文案编辑后自动失效。
-
-## 1.0.1 (2026-08-30)
-
-### 🔐 WebUI 凭据体系升级
-
-- **密码存储**：PBKDF2 → **Argon2id**（`m=64MiB, t=3, p=4`，OWASP 2024 推荐），内存硬化抗 GPU 暴力破解
-- **会话令牌**：自签 HMAC → **PyJWT (HS256)** + 服务端会话表 `webui_sessions`（jti 绑定，12h TTL）
-- **多会话管理**：新增「我的会话」面板，可查看每个活跃会话的 IP / UA / 最后活跃时间，并单独撤销任意设备
-- **改密安全**：修改密码后自动撤销全部活跃会话（含当前设备），强制重新登录
-- **配置明文**：WebUI 配置页 `webui_password` 字段以明文文本框展示输入（提交后立即 Argon2id 哈希存盘），`webui_jwt_secret` 同理
-- **迁移说明**：旧的 PBKDF2 哈希不再被识别，启动时若检测到 `pbkdf2$` 前缀会作废并触发 bootstrap 重新生成临时密码（明文一次性打到启动日志）；既有 cookie 全部失效，需重新登录
-- **依赖新增**：`argon2-cffi>=23.1,<24`、`pyjwt>=2.8,<3`
-
-## 1.0.0 (2026-08-29)
+﻿## 1.0.0 (2026-08-31)
 
 🏢 **打工人·上班族物语** —— AstrBot 大型群聊职场生存模拟游戏（首个公开版本）。
 
@@ -72,8 +35,7 @@
 | 📰 资讯 | `职场早报` / `年终考评` / `发年终奖` / `我的简历` / `我的技能` / `成就` / `佩戴称号` | 进度与反馈 |
 | ⚙ 系统 | `帮助` / `推送` / `推送状态` | 群每日早报推送开关 + 帮助中心 |
 
-> 完整说明、配置项与 WebUI 用法见 [README](README.md)；首次发版的稳定性与安全细节
-> 见 `docs/CHANGELOG_INTERNAL.md`。
+> 完整说明、配置项与 WebUI 用法见 [README](README.md)。
 
 ### ✨ 首次发版包含的全部玩法
 

@@ -870,6 +870,7 @@ class WebUIServer:
         target = self._live_config
         applied = 0
         notes: list[str] = []
+        pwd_changed = False
         for k, raw in values.items():
             meta = schema.get(k)
             if not meta:
@@ -878,17 +879,30 @@ class WebUIServer:
                 v = self._coerce(meta.get("type", "string"), raw, meta)
             except (TypeError, ValueError):
                 continue
-            if k in CONFIG_HIDDEN_KEYS and v == "":
-                # 敏感键留空 = 保持原值；但密码例外：
-                # 非本机监听时禁止清空（防止运行中的 WebUI 变为无鉴权裸奔，
-                # 启动守卫只在 initialize 生效），本机监听则允许显式关闭密码
-                if k == "webui_password":
+            if k == "webui_password":
+                # 密码特殊处理：写入 _live_config 的必须是 Argon2id 哈希，明文只活在
+                # 本次请求的局部变量里。空串表示"保持原值"，仅本机监听允许显式清空。
+                if v == "":
                     cur_host = str(target.get("webui_host") or self.host)
                     if cur_host in ("127.0.0.1", "localhost", "::1"):
                         target[k] = ""
                         applied += 1
-                        continue
-                    notes.append("非本机监听下不允许清空访问密码，已保持原值")
+                        pwd_changed = True
+                    else:
+                        notes.append("非本机监听下不允许清空访问密码，已保持原值")
+                else:
+                    new_hash = (
+                        v
+                        if v.startswith("$argon2id$")
+                        else await asyncio.to_thread(hash_password, v)
+                    )
+                    if new_hash != self.password_stored:
+                        target[k] = new_hash  # 落盘前先写成哈希
+                        applied += 1
+                        pwd_changed = True
+                continue
+            if k in CONFIG_HIDDEN_KEYS and v == "":
+                # 其余敏感键留空 = 保持原值
                 continue
             target[k] = v
             applied += 1
@@ -898,11 +912,11 @@ class WebUIServer:
             await asyncio.to_thread(save)  # 落盘是同步文件写，别堵事件循环
             persisted = True
         # 密码修改即时生效（无需重载插件）；同时让旧 cookie 全部失效
-        if "webui_password" in values:
+        if pwd_changed:
             new_pwd = str(target.get("webui_password") or "")
-            # 留空 = 保持不变；新值先哈希再持久化（明文永远不出现在 _live_config 之外）
-            if new_pwd and not new_pwd.startswith("$argon2id$"):
-                new_pwd = await asyncio.to_thread(hash_password, new_pwd)
+            # 哈希已在上面的循环里写回 target，这里只做内存态同步 + 撤销旧会话。
+            # 哈希可能因平台不同而不相等，仅当实际改了口令时才撤销会话，避免每次
+            # 保存配置都把管理员踢下线。
             if new_pwd != self.password_stored:
                 try:
                     await asyncio.to_thread(self.db.revoke_all_webui_sessions)

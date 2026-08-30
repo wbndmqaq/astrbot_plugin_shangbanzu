@@ -23,12 +23,13 @@ async def eat(db, gid, uid, nickname, mode, cfg):
         return R(
             err=f"刚吃过就又饿？冷却中：{logic.fmt_remaining(logic.cd_left(p, 'meal'))}"
         )
-    logic.cd_set(p, "meal", cd)
     meal = meals[mode]
     if float(p["cash"]) < meal["cost"]:
+        # 先校验余额再扣冷却：钱不够时不能白烧一次冷却
         return R(
             err=f"吃「{mode}」需要 {meal['cost']} 元，余额不足（要不试试喝西北风？）"
         )
+    logic.cd_set(p, "meal", cd)
     p["cash"] = round(max(0.0, float(p["cash"]) - meal["cost"]), 2)
     p["health"] = round(float(p["health"]) + meal["health"], 1)
     p["mind"] = round(float(p["mind"]) + meal["mind"], 1)
@@ -109,7 +110,7 @@ async def move_house(db, gid, uid, nickname, keyword, cfg):
                 "foot": (
                     "你已拥有自购小窝，无需再租房"
                     if int(p.get("house_owned") or 0) == 1
-                    else "自购小窝仅可通过「买房」获得；发送「租房 名称」入住，搬家需支付押金"
+                    else "自购小窝仅可通过「买房」获得；发送「租房 名称」入住，搬家需支付押金（旧房押金不退）"
                 ),
             },
             text="租房可选："
@@ -131,6 +132,9 @@ async def move_house(db, gid, uid, nickname, keyword, cfg):
                 break
     if target_i is None:
         return R(err=f"没有叫「{kw}」的房子，发送「租房」查看房源列表")
+    if target_i == 7:
+        # 自购小窝只能通过「买房」全款获得，禁止借「租房 7」白嫖
+        return R(err="「自购小窝」是全款买房才能获得的房产，发送「买房」查看条件")
     cur = gd.house(int(p["house"]))
     tgt = gd.house(target_i)
     if tgt["i"] == cur["i"]:
@@ -602,7 +606,8 @@ async def buy_house(db, gid, uid, nickname, cfg):
     p["cash"] = round(float(p["cash"]) - due, 2)
     p["house_owned"] = 1
     p["house"] = 7
-    p["fund_savings"] = 0.0
+    # 公积金只消耗实际抵扣的 offset，多余部分保留（此前整笔清零会造成资金蒸发）
+    p["fund_savings"] = round(fund_pool - offset, 2)
     p["mind"] = round(min(100.0, float(p["mind"]) + 30), 1)
     await asyncio.to_thread(db.save_player, p)
     name = p.get("card") or p["nickname"] or uid

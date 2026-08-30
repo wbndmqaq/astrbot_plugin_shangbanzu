@@ -79,13 +79,14 @@ async def transfer(ctx, event):
     ats = ctx.ats(event)
     if not ats:
         return R(err="请@收款人，如：转账 500 @群友")
-    nums = ctx.nums(event, ("转账",))
+    # 有 @ 时先剔除收款人 QQ，避免适配器把 @ 渲染成数字文本后金额误取为 QQ 号
+    amount = ctx.amount_after(event, ("转账",), (ats[0],))
     return await finance.transfer(
         ctx.db,
         gid,
         str(event.get_sender_id()),
         ats[0],
-        nums[0] if nums else "0",
+        amount,
         ctx.config,
         await ctx.anick(event, ats[0]),
     )

@@ -285,7 +285,7 @@ async def transfer(db, gid, me, target, amount, cfg, target_name=""):
     td = await asyncio.to_thread(db.get_player, gid, target)
     tname = td.get("card") or td["nickname"] or target_name or f"用户{target}"
     await asyncio.to_thread(
-        db.add_transaction, gid, me, "转账(出)", -amt, f"转给 {tname}"
+        db.add_transaction, gid, me, "转账(出)", -(amt + fee), f"转给 {tname}（含手续费 {fee}）"
     )
     await asyncio.to_thread(
         db.add_transaction, gid, target, "转账(入)", amt, f"来自 {p.get('card') or p.get('nickname') or me}"

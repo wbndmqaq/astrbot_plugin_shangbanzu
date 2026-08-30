@@ -1043,6 +1043,16 @@
     "max": 1000000000.0,
     "description": "副业每级升级费用基数"
   },
+  "shopping_budgets": {
+    "type": "list",
+    "default": [99, 299, 999],
+    "description": "购物价格档位（元），随机命中一档"
+  },
+  "shopping_weights": {
+    "type": "list",
+    "default": [60, 30, 10],
+    "description": "购物价格档位的命中权重（与 shopping_budgets 一一对应）"
+  },
   "skill_cooldown_days": {
     "type": "float",
     "default": 7.0,

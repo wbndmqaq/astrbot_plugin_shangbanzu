@@ -116,6 +116,26 @@ class GameCtx:
             s = s.replace(w, " ")
         return re.findall(r"\d+", s)
 
+    @staticmethod
+    def amount_after(
+        event, words: tuple[str, ...], exclude_uids: list[str] | tuple[str, ...] = ()
+    ) -> str:
+        """取消息里第一个数字作为金额，但先把 exclude_uids 的数字剔除。
+
+        适配器（尤其 OneBot/CQ）常把 @ 组件渲染成带对方 QQ 数字的文本，
+        若直接 nums() 会把对方 QQ 当成金额（例：转账 @123456 500 会转 123456）。
+        这里把被 @ 的目标/自己等 uid 先剔掉再扫数字，只对这类场景生效。
+        """
+        s = event.message_str or ""
+        for w in sorted(words, key=len, reverse=True):
+            s = s.replace(w, " ")
+        for u in exclude_uids:
+            u = str(u)
+            if u:
+                s = s.replace(u, " ")
+        nums = re.findall(r"\d+", s)
+        return nums[0] if nums else ""
+
     def target(self, event, words: tuple[str, ...]):
         ats = self.ats(event)
         if ats:
