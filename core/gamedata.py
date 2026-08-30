@@ -172,6 +172,11 @@ def certs() -> dict[str, dict]:
     return {str(c["name"]): dict(c) for c in load_all()["certs"]["certs"]}
 
 
+
+def skills() -> dict[str, dict]:
+    """{技能名：{cost, exp}}（resources/data/skills.json）。"""
+    return {str(s["name"]): dict(s) for s in load_all()["skills"]["skills"]}
+
 def scratch_table() -> tuple[list[dict], dict]:
     """刮刮乐奖项表 (中奖档位列表, 未中奖档位)。
 
