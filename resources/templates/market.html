@@ -25,10 +25,6 @@ body { font-family:"Microsoft YaHei","PingFang SC",sans-serif;
 .mid { flex:1; font-size:13px; color:#c9cede; line-height:1.5; }
 .val { color:#ffd86f; font-weight:bold; white-space:nowrap; font-size:15px; }
 
-.tmpl-footer {
-  text-align:center; color:#8a93b5; font-size:12.5px;
-  margin-top:14px; line-height:1.6;
-}
 </style>
 </head>
 <body>
@@ -41,7 +37,7 @@ body { font-family:"Microsoft YaHei","PingFang SC",sans-serif;
     {% if r is mapping and r.name %}
     <div class="row">
       <div class="rk">{% if r.rank == 1 %}🥇{% elif r.rank == 2 %}🥈{% elif r.rank == 3 %}🥉{% else %}{{ r.rank or loop.index }}{% endif %}</div>
-      {% if r.avatar %}<img src="{{ r.avatar }}">{% elif r.name %}<div class="avf">{{ r.name[:1] }}</div>{% else %}<div class="avf">?</div>{% endif %}
+      {% if r.avatar %}<img src="{{ r.avatar }}" alt="" onerror="this.remove()">{% elif r.name %}<div class="avf">{{ r.name[:1] }}</div>{% else %}<div class="avf">?</div>{% endif %}
       <div class="nm"><b>{{ r.name }}</b><span>{{ r.id or '' }}</span></div>
       <div class="mid">{{ r.company or '无业' }} · {{ r.position or '实习生' }}<br>月薪 {{ r.boss or 0 }}</div>
       <div class="val">{{ r.value or 0 }} 元</div>

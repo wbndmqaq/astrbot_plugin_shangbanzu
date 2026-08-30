@@ -6,15 +6,11 @@ import time
 
 from . import gamedata as gd
 from . import logic
-from .career import R, _cd_left, _cd_set, _clamp_status, _exempt, _load
-
-
-def _ws_data():
-    return gd.load_all().get("workstations", {}).get("workstations", [])
+from .result import R
 
 
 async def party_lottery(db, gid, uid, nickname, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     if int(p["company"]) == -1:
         return R(err="失业人士连年会邀请函都收不到")
     year = time.strftime("%Y")
@@ -23,17 +19,28 @@ async def party_lottery(db, gid, uid, nickname, cfg):
     p["party_year"] = year
 
     prizes = gd.t("extra2", "party_prizes")
-    roll = random.random()
-    if roll < 0.03:
-        prize = random.choice([x for x in prizes if x["amount"] >= 8000])
-    elif roll < 0.10:
-        prize = random.choice([x for x in prizes if 2000 <= x["amount"] < 8000])
-    elif roll < 0.25:
-        prize = random.choice([x for x in prizes if 100 <= x["amount"] < 2000])
-    elif roll < 0.50:
-        prize = random.choice([x for x in prizes if 0 < x["amount"] < 100])
-    else:
-        prize = random.choice([x for x in prizes if x["amount"] == 0])
+    # 四档中奖概率（累积），其余为「谢谢参与」。分桶阈值随奖品表走，不额外开放。
+    rates = [
+        float(logic.cfg_get(cfg, "party_grand_rate", 0.03)),
+        float(logic.cfg_get(cfg, "party_first_rate", 0.07)),
+        float(logic.cfg_get(cfg, "party_second_rate", 0.15)),
+        float(logic.cfg_get(cfg, "party_third_rate", 0.25)),
+    ]
+    buckets = [
+        [x for x in prizes if x["amount"] >= 8000],
+        [x for x in prizes if 2000 <= x["amount"] < 8000],
+        [x for x in prizes if 100 <= x["amount"] < 2000],
+        [x for x in prizes if 0 < x["amount"] < 100],
+    ]
+    empty = [x for x in prizes if x["amount"] == 0]
+    roll, accum, prize = random.random(), 0.0, None
+    for rate, bucket in zip(rates, buckets, strict=True):
+        accum += rate
+        if roll < accum and bucket:
+            prize = random.choice(bucket)
+            break
+    if prize is None:
+        prize = random.choice(empty or prizes)
 
     amount = int(prize.get("amount", 0))
     if amount > 0:
@@ -68,11 +75,17 @@ async def party_lottery(db, gid, uid, nickname, cfg):
 
 
 async def lend_money(db, gid, me, target, amount, cfg, target_name=""):
-    p = await _load(db, gid, me, "", cfg)
-    td = await _load(db, gid, target, target_name, cfg)
-    amt = int(amount) if str(amount).isdigit() else 0
-    if amt <= 0:
-        return R(err="请输入正确的借款金额")
+    if str(target) == str(me):
+        return R(err="不能借钱给自己")
+    amt = logic.parse_int(amount, lo=1)
+    if amt is None:
+        return R(err="请输入正确的借款金额，例如「借钱 @群友 500」")
+    p = await logic.load_player(db, gid, me, "", cfg)
+    # 借款对象必须已入档：load_player 会给陌生 ID 顺手建号
+    td = await asyncio.to_thread(db.find_player_any, gid, str(target))
+    if not td:
+        return R(err="对方还没有加入游戏（让 TA 先发一次「上班」），借不了")
+    target = td["uid"]
     if str(target) == str(me):
         return R(err="不能借钱给自己")
     tname = td.get("card") or td["nickname"] or target_name or f"用户{target}"
@@ -80,9 +93,9 @@ async def lend_money(db, gid, me, target, amount, cfg, target_name=""):
         return R(
             err=f"你只有 {logic.fmt_money(p['cash'])} 元，借不了 {logic.fmt_money(amt)} 元"
         )
-    if random.random() < 0.30:
-        p["cash"] = round(float(p["cash"]) - amt, 2)
-        await asyncio.to_thread(db.save_player, p)
+    if random.random() < float(logic.cfg_get(cfg, "lend_fail_rate", 0.3)):
+        if not await asyncio.to_thread(db.try_debit_cash, gid, me, float(amt)):
+            return R(err="现金不足，借款失败")
         await asyncio.to_thread(
             db.add_transaction, gid, me, "借钱(未还)", -amt, f"借给{tname}"
         )
@@ -98,10 +111,11 @@ async def lend_money(db, gid, me, target, amount, cfg, target_name=""):
             },
             text=f"借钱给 {tname} 失败：{line}（损失 {logic.fmt_money(amt)} 元）",
         )
-    p["cash"] = round(float(p["cash"]) - amt, 2)
-    td["cash"] = round(float(td["cash"]) + amt, 2)
-    await asyncio.to_thread(db.save_player, p)
-    await asyncio.to_thread(db.save_player, td)
+    ok, _reason = await asyncio.to_thread(db.transfer_cash, gid, me, target, float(amt))
+    if not ok:
+        return R(err="现金不足或对方未加入游戏，借款失败")
+    p = await asyncio.to_thread(db.get_player, gid, me)
+    td = await asyncio.to_thread(db.get_player, gid, target)
     await asyncio.to_thread(
         db.add_transaction, gid, me, "借钱(出)", -amt, f"借给{tname}"
     )
@@ -144,9 +158,9 @@ async def career_advice(ctx_db=None):
 
 
 async def upgrade_workstation(db, gid, uid, nickname, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     cur_lv = int(p.get("workstation") or 0)
-    ws_list = _ws_data()
+    ws_list = gd.workstations()
     if cur_lv >= len(ws_list) - 1:
         return R(err="你的工位已经是顶级配置了，全公司最靓的仔")
     nxt = ws_list[cur_lv + 1]
@@ -179,23 +193,30 @@ async def upgrade_workstation(db, gid, uid, nickname, cfg):
 
 
 async def overtime_meal(db, gid, uid, nickname, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     if int(p["company"]) == -1:
         return R(err="失业人士没有加班餐")
     now = int(time.time())
     hour = time.localtime(now).tm_hour
-    if hour < 18:
-        return R(err="现在还没到加班时间，正常吃饭去")
-    if not _exempt(cfg, uid) and _cd_left(p, "ot_meal") > 0:
+    start_hour = int(logic.cfg_get(cfg, "overtime_meal_start_hour", 18))
+    if hour < start_hour:
+        return R(err=f"现在还没到加班时间（{start_hour} 点后可领），正常吃饭去")
+    if not logic.is_exempt(cfg, uid) and logic.cd_left(p, "ot_meal") > 0:
         return R(
-            err=f"加班餐一天只能领一次：剩余 {logic.fmt_remaining(_cd_left(p, 'ot_meal'))}"
+            err=f"加班餐一天只能领一次：剩余 {logic.fmt_remaining(logic.cd_left(p, 'ot_meal'))}"
         )
-    _cd_set(p, "ot_meal", 86400)
+    logic.cd_set(
+        p, "ot_meal", float(logic.cfg_get(cfg, "overtime_meal_cooldown_hours", 24)) * 3600
+    )
     line = logic.pick(gd.t("extra2", "ot_meal"))
-    subsidy = min(30, int(float(p["salary"]) / 220))
+    subsidy = min(
+        float(logic.cfg_get(cfg, "overtime_meal_subsidy_max", 30.0)),
+        float(p["salary"]) / (logic.workdays(cfg) * 10),
+    )
+    subsidy = round(subsidy, 2)
     p["cash"] = round(float(p["cash"]) + subsidy, 2)
     p["mind"] = round(float(p["mind"]) + 3, 1)
-    _clamp_status(p)
+    logic.clamp_status(p)
     await asyncio.to_thread(db.save_player, p)
     await asyncio.to_thread(
         db.add_transaction, gid, uid, "加班餐补", subsidy, "加班餐补贴"
@@ -217,16 +238,16 @@ async def overtime_meal(db, gid, uid, nickname, cfg):
 
 
 async def health_checkup(db, gid, uid, nickname, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     year = time.strftime("%Y")
     if p.get("checkup_year") == year:
         return R(err="今年的年度体检已经做过了")
     p["checkup_year"] = year
-    cost = 200
+    cost = float(logic.cfg_get(cfg, "checkup_cost", 200.0))
     if float(p["cash"]) < cost:
-        return R(err=f"体检需要 {cost} 元，余额不足")
-    p["cash"] = round(float(p["cash"]) - cost, 2)
-    if random.random() < 0.55:
+        return R(err=f"体检需要 {logic.fmt_money(cost)} 元，余额不足")
+    p["cash"] = round(max(0.0, float(p["cash"]) - cost), 2)
+    if random.random() < float(logic.cfg_get(cfg, "checkup_ok_rate", 0.55)):
         line = logic.pick(gd.t("extra2", "checkup_ok"))
         p["health"] = round(min(100, float(p["health"]) + 5), 1)
         icon, accent, title = "✅", "#6fe08c", "体检结果良好"
@@ -234,7 +255,7 @@ async def health_checkup(db, gid, uid, nickname, cfg):
         line = logic.pick(gd.t("extra2", "checkup_bad"))
         p["health"] = round(max(10, float(p["health"]) - 8), 1)
         icon, accent, title = "🏥", "#fc6262", "体检结果堪忧"
-    _clamp_status(p)
+    logic.clamp_status(p)
     await asyncio.to_thread(db.save_player, p)
     await asyncio.to_thread(db.add_transaction, gid, uid, "年度体检", -cost, title)
     return R(

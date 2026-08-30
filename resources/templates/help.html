@@ -53,6 +53,9 @@ td.desc { color:#c9cede }
   </div>
 {% endfor %}
 
-  <div class="footer">{{ plugin_version }} · AstrBot {{ astrbot_version }}</div>
+  <div class="footer">
+    共 {{ total_cmds }} 条指令 · {{ company_count }} 家公司在招{% if webui_port %} · WebUI 端口 {{ webui_port }}{% endif %}<br>
+    {{ plugin_version }} · AstrBot {{ astrbot_version }}
+  </div>
 </body>
 </html>

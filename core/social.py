@@ -5,18 +5,20 @@ import random
 
 from . import gamedata as gd
 from . import logic
-from .career import _cd_left, _cd_set, _exempt, _load
 from .result import R
 
 
-async def market_list(db, gid, app_id: str = ""):
+async def market_list(db, gid, app_id: str = "", cfg=None):
     players = await asyncio.to_thread(db.all_players, gid)
     if not players:
         return R(err="本群还没有人入职任何公司，快发送「找工作」当第一个上班族")
     players.sort(key=lambda x: (int(x["lvl"]), float(x["salary"])), reverse=True)
+    names = gd.company_names(
+        await asyncio.to_thread(db.custom_companies_of_group, gid)
+    )
     rows = []
-    for i, pl in enumerate(players[:60], 1):
-        comp = gd.company_by_id(int(pl["company"]))
+    cap = int(logic.cfg_get(cfg, "market_list_max", 60))
+    for i, pl in enumerate(players[:cap], 1):
         rows.append(
             {
                 "rank": i,
@@ -24,7 +26,7 @@ async def market_list(db, gid, app_id: str = ""):
                 "id": pl["uid"],
                 "value": logic.fmt_money(pl["value"]),
                 "position": gd.position(int(pl["lvl"]))["title"],
-                "company": comp["name"] if comp else "无业",
+                "company": gd.display_company(pl["company"], names),
                 "boss": logic.fmt_money(pl["salary"]) + " 元/月",
                 "avatar": logic.avatar_of(pl["uid"], app_id),
             }
@@ -40,25 +42,38 @@ async def market_list(db, gid, app_id: str = ""):
 async def duel(db, gid, me, target, cfg, target_name="", app_id: str = ""):
     if str(target) == str(me):
         return R(err="自己跟自己对线？精神状态堪忧啊朋友")
-    p = await _load(db, gid, me, "", cfg)
-    td = await _load(db, gid, target, target_name, cfg)
+    # 对手必须是已入档玩家：否则可以对着随手编的 ID 建号刷胜场和奖金
+    td = await asyncio.to_thread(db.find_player_any, gid, str(target))
+    if not td:
+        return R(err="对方还没有加入游戏（让 TA 先发一次「上班」），没法对线")
+    target = td["uid"]
+    # find_player_any 可能解析到自己的别名（如昵称匹配命中自己），再防一次
+    if str(target) == str(me):
+        return R(err="自己跟自己对线？精神状态堪忧啊朋友")
+    p = await logic.load_player(db, gid, me, "", cfg)
     fmt = logic.fmt_money
     my_name = p.get("card") or p["nickname"] or me
     t_name = td.get("card") or td["nickname"] or target_name or f"用户{target}"
 
     cd = float(logic.cfg_get(cfg, "duel_cooldown_hours", 2)) * 3600
-    if not _exempt(cfg, me) and _cd_left(p, "duel") > 0:
+    if not logic.is_exempt(cfg, me) and logic.cd_left(p, "duel") > 0:
         return R(
-            err=f"对线上头伤身，冷却中：剩余 {logic.fmt_remaining(_cd_left(p, 'duel'))}"
+            err=f"对线上头伤身，冷却中：剩余 {logic.fmt_remaining(logic.cd_left(p, 'duel'))}"
         )
     fee = float(logic.cfg_get(cfg, "duel_entry_fee", 50))
     if float(p["cash"]) < fee:
         return R(err=f"对线需要 {logic.fmt_money(fee)} 元场地费，余额不足")
-    _cd_set(p, "duel", cd)
+    logic.cd_set(p, "duel", cd)
+
+    # 探测【防甩锅护盾】（仅失利时消耗，胜利保留）
+    cds = p.setdefault("_cds", {})
+    shield = cds.get("shield_active")
 
     v1, v2 = float(p["value"]), float(td["value"])
     diff = v1 - v2
-    win_rate = 0.5 + min(0.3, abs(diff) / max(v1, v2, 1) * 0.5) * (
+    weight = float(logic.cfg_get(cfg, "duel_value_weight", 0.5))
+    max_adv = float(logic.cfg_get(cfg, "duel_max_advantage", 0.3))
+    win_rate = 0.5 + min(max_adv, abs(diff) / max(v1, v2, 1) * weight) * (
         1 if diff > 0 else -1
     )
     win = random.random() < win_rate
@@ -67,6 +82,27 @@ async def duel(db, gid, me, target, cfg, target_name="", app_id: str = ""):
     process = random.sample(
         actions_pool, k=min(len(actions_pool), random.randint(3, 4))
     )
+
+    # 护盾生效分支：对线失败但持有护盾，免除场地费扣除与身价下跌
+    if not win and shield:
+        cds.pop("shield_active", None)
+        await asyncio.to_thread(db.save_player, p)
+        return R(
+            tmpl="panel",
+            data={
+                "icon": "🛡️",
+                "title": "对线失利 · 护盾生效！",
+                "accent": "#ffd86f",
+                "lines": [f"你在与 {t_name} 的PPT对线中落于下风，但你装配的【防甩锅护盾】为你吸收了全部惩罚！"],
+                "blocks": [
+                    {"label": "护盾状态", "value": "已消耗 1 层"},
+                    {"label": "场地费/身价", "value": "100% 豁免"},
+                    {"label": "战绩记录", "value": "不计入负场"},
+                ],
+            },
+            text="对线失利！但你的【防甩锅护盾】生效，免除了场地费与身价扣除！",
+        )
+
     result_line = logic.pick(gd.t("duel", "win_lines" if win else "lose_lines"))
 
     reward_rate = float(logic.cfg_get(cfg, "duel_reward_rate", 0.2))
@@ -75,19 +111,30 @@ async def duel(db, gid, me, target, cfg, target_name="", app_id: str = ""):
     reward = round(fee * (1 + reward_rate), 2) if win else 0.0
     net = round(reward - fee, 2)
     p["cash"] = round(float(p["cash"]) + net, 2)
-    winner_p, loser_p = (p, td) if win else (td, p)
-    v_up = int(float(winner_p["value"]) * bonus_rate)
-    v_down = int(float(loser_p["value"]) * 0.05)
-    winner_p["value"] = round(float(winner_p["value"]) + v_up, 2)
-    loser_p["value"] = round(max(20.0, float(loser_p["value"]) - v_down), 2)
+    v_up = int(float(p["value"]) * bonus_rate) if win else int(float(td["value"]) * bonus_rate)
+    # 败方身价惩罚率必须与胜方加成一起可调：只调加成会让每场对线净增身价
+    penalty_rate = float(logic.cfg_get(cfg, "duel_value_penalty_rate", 0.05))
+    v_down = (
+        int(float(td["value"]) * penalty_rate)
+        if win
+        else int(float(p["value"]) * penalty_rate)
+    )
+    # 我方在 per-user 锁内走 save_player；对方走原子列更新，
+    # 防止"读对方快照→全列覆盖"把对方并发改动（存款/打卡等）冲掉
     if win:
+        p["value"] = round(float(p["value"]) + v_up, 2)
         p["duel_wins"] = int(p["duel_wins"]) + 1
-        td["duel_losses"] = int(td["duel_losses"]) + 1
+        await asyncio.to_thread(db.save_player, p)
+        await asyncio.to_thread(db.bump_duel_loss, gid, str(target), float(v_down))
     else:
+        p["value"] = round(max(20.0, float(p["value"]) - v_down), 2)
         p["duel_losses"] = int(p["duel_losses"]) + 1
-        td["duel_wins"] = int(td["duel_wins"]) + 1
-    await asyncio.to_thread(db.save_player, p)
-    await asyncio.to_thread(db.save_player, td)
+        await asyncio.to_thread(db.save_player, p)
+        await asyncio.to_thread(db.bump_duel_win, gid, str(target), float(v_up))
+    # 展示值：我方取内存，对方取落库后的真实值（含 MAX(20) 下限）
+    td_after = await asyncio.to_thread(db.get_player, gid, str(target))
+    winner_value = p["value"] if win else td_after["value"]
+    loser_value = td_after["value"] if win else p["value"]
     w_name = my_name if win else t_name
     l_name = t_name if win else my_name
     await asyncio.to_thread(
@@ -118,11 +165,11 @@ async def duel(db, gid, me, target, cfg, target_name="", app_id: str = ""):
                 },
                 {
                     "label": f"{w_name} 身价",
-                    "value": f"+{v_up} -> {fmt(winner_p['value'])}",
+                    "value": f"+{v_up} -> {fmt(winner_value)}",
                 },
                 {
                     "label": f"{l_name} 身价",
-                    "value": f"-{v_down} -> {fmt(loser_p['value'])}",
+                    "value": f"-{v_down} -> {fmt(loser_value)}",
                 },
                 {
                     "label": "你的战绩",
@@ -155,25 +202,31 @@ async def rank_show(db, gid, me):
 
 
 async def rank_join(db, gid, me, cfg, nickname=""):
-    p = await _load(db, gid, me, nickname, cfg)
+    p = await logic.load_player(db, gid, me, nickname, cfg)
     if int(p["company"]) == -1:
         return R(err="连工作都没有还想去卷？先「找工作」")
     cooldown = int(float(logic.cfg_get(cfg, "rank_cooldown_minutes", 60.0)) * 60)
-    if not _exempt(cfg, me) and _cd_left(p, "rank") > 0:
+    if not logic.is_exempt(cfg, me) and logic.cd_left(p, "rank") > 0:
         return R(
-            err=f"大赛间隔中，让选手缓缓：剩余 {logic.fmt_remaining(_cd_left(p, 'rank'))}"
+            err=f"大赛间隔中，让选手缓缓：剩余 {logic.fmt_remaining(logic.cd_left(p, 'rank'))}"
         )
 
     ev = logic.pick(gd.rank_events())
     opponent = gd.match_opponent(int(p["rank_score"]))
-    win = random.random() < 0.5 * float(ev["effect"])
-    diff = logic.elo_change(int(p["rank_score"]), int(opponent["score"]), win)
+    base = float(logic.cfg_get(cfg, "rank_base_win_rate", 0.5))
+    win = random.random() < base * float(ev["effect"])
+    diff = logic.elo_change(
+        int(p["rank_score"]),
+        int(opponent["score"]),
+        win,
+        k=int(logic.cfg_get(cfg, "rank_elo_k", 32)),
+    )
     p["rank_score"] = max(0, int(p["rank_score"]) + diff)
     p["rank_matches"] = int(p["rank_matches"]) + 1
     p["rank_tier"] = logic.tier_of(p["rank_score"])
-    reward = int(abs(diff) * 0.1)
+    reward = int(abs(diff) * float(logic.cfg_get(cfg, "rank_reward_rate", 0.1)))
     p["cash"] = round(float(p["cash"]) + reward, 2)
-    _cd_set(p, "rank", cooldown)
+    logic.cd_set(p, "rank", cooldown)
     await asyncio.to_thread(db.save_player, p)
     name = p.get("card") or p["nickname"] or me
     await asyncio.to_thread(
@@ -207,7 +260,7 @@ async def rank_join(db, gid, me, cfg, nickname=""):
     )
 
 
-async def rank_data(db, gid, kind, app_id: str = ""):
+async def rank_data(db, gid, kind, app_id: str = "", cfg=None):
     kind = kind if kind in ("wealth", "exp", "value", "level") else "wealth"
     titles = {
         "wealth": "富豪榜（总资产）",
@@ -216,21 +269,27 @@ async def rank_data(db, gid, kind, app_id: str = ""):
         "level": "职级榜（职位·月薪）",
     }
     units = {"wealth": "元", "exp": "点经验", "value": "身价", "level": "职级"}
+    top_n = int(logic.cfg_get(cfg, "ranking_top_n", 10))
     if kind == "level":
-        players = await asyncio.to_thread(db.top_level, gid, 10)
+        players = await asyncio.to_thread(db.top_level, gid, top_n)
     elif kind == "wealth":
-        players = await asyncio.to_thread(db.top_wealth, gid, 10)
+        players = await asyncio.to_thread(db.top_wealth, gid, top_n)
     else:
         col = "exp" if kind == "exp" else "value"
-        players = await asyncio.to_thread(db.top_by_column, gid, col, 10)
+        players = await asyncio.to_thread(db.top_by_column, gid, col, top_n)
     rows = []
+    names = (
+        gd.company_names(await asyncio.to_thread(db.custom_companies_of_group, gid))
+        if kind == "level"
+        else {}
+    )
     for pl in players:
         if kind == "wealth":
             score_val = logic.fmt_money(pl.get("total", 0))
         elif kind == "level":
-            comp = gd.company_by_id(int(pl["company"]))
+            comp_name = gd.display_company(pl["company"], names, jobless="")
             score_val = f"L{pl['lvl']} · {gd.position(int(pl['lvl']))['title']}" + (
-                f" @ {comp['name']}" if comp else ""
+                f" @ {comp_name}" if comp_name else ""
             )
         elif kind == "exp":
             score_val = f"{pl['exp']} 点"

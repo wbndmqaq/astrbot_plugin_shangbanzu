@@ -1,68 +1,40 @@
 """生活系统服务：吃饭、健身、租房、通勤、午休、团建、购物、买房、工资条。"""
 
 import asyncio
+import json
 import random
 import time
 
 from . import gamedata as gd
 from . import logic
-from .career import _cd_left, _cd_set, _clamp_status, _exempt, _load
 from .result import R
-
-MEALS = {
-    "外卖": {"cost": 20, "health": 2, "mind": 10},
-    "食堂": {"cost": 10, "health": 4, "mind": 3},
-    "大餐": {"cost": 128, "health": 10, "mind": 25},
-}
-HOUSE_KEYS = [
-    ("桥洞", 0),
-    ("风水宝地", 0),
-    ("床位", 1),
-    ("合租", 1),
-    ("单间", 2),
-    ("城中村", 2),
-    ("一居", 3),
-    ("老小区", 3),
-    ("两居", 4),
-    ("电梯", 4),
-    ("平层", 5),
-    ("精装", 5),
-    ("大宅", 6),
-    ("江景", 6),
-    ("学区", 8),
-    ("别墅", 9),
-    ("花园", 9),
-    ("宿舍", 10),
-    ("酒店", 11),
-    ("长租", 11),
-]
 
 
 async def eat(db, gid, uid, nickname, mode, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
+    meals = gd.meals()
     mode = (mode or "").strip()
     if not mode:
-        mode = random.choice(["外卖", "食堂"])
-    if mode not in MEALS:
-        return R(err="吃法不对！可选：「吃饭 外卖」「吃饭 食堂」「吃饭 大餐」")
+        mode = random.choice(list(meals)[:2] or list(meals))
+    if mode not in meals:
+        return R(err="吃法不对！可选：" + " / ".join(f"「吃饭 {k}」" for k in meals))
     cd = float(logic.cfg_get(cfg, "meal_cooldown_minutes", 30)) * 60
-    if not _exempt(cfg, uid) and _cd_left(p, "meal") > 0:
+    if not logic.is_exempt(cfg, uid) and logic.cd_left(p, "meal") > 0:
         return R(
-            err=f"刚吃过就又饿？冷却中：{logic.fmt_remaining(_cd_left(p, 'meal'))}"
+            err=f"刚吃过就又饿？冷却中：{logic.fmt_remaining(logic.cd_left(p, 'meal'))}"
         )
-    _cd_set(p, "meal", cd)
-    meal = MEALS[mode]
+    logic.cd_set(p, "meal", cd)
+    meal = meals[mode]
     if float(p["cash"]) < meal["cost"]:
         return R(
             err=f"吃「{mode}」需要 {meal['cost']} 元，余额不足（要不试试喝西北风？）"
         )
-    p["cash"] = round(float(p["cash"]) - meal["cost"], 2)
+    p["cash"] = round(max(0.0, float(p["cash"]) - meal["cost"]), 2)
     p["health"] = round(float(p["health"]) + meal["health"], 1)
     p["mind"] = round(float(p["mind"]) + meal["mind"], 1)
-    _clamp_status(p)
+    logic.clamp_status(p)
     await asyncio.to_thread(db.save_player, p)
-    key = {"外卖": "takeout", "食堂": "canteen", "大餐": "feast"}[mode]
-    line = logic.pick(gd.t("life", key))
+    line = logic.pick(gd.t("life", meal.get("key") or "takeout"))
     return R(
         tmpl="panel",
         data={
@@ -82,21 +54,23 @@ async def eat(db, gid, uid, nickname, mode, cfg):
 
 
 async def gym(db, gid, uid, nickname, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
-    cost = 30.0
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
+    cost = float(logic.cfg_get(cfg, "gym_cost", 30.0))
     cd = float(logic.cfg_get(cfg, "gym_cooldown_hours", 2)) * 3600
-    if not _exempt(cfg, uid) and _cd_left(p, "gym") > 0:
+    if not logic.is_exempt(cfg, uid) and logic.cd_left(p, "gym") > 0:
         return R(
-            err=f"肌肉还在酸痛，休息一下：剩余 {logic.fmt_remaining(_cd_left(p, 'gym'))}"
+            err=f"肌肉还在酸痛，休息一下：剩余 {logic.fmt_remaining(logic.cd_left(p, 'gym'))}"
         )
     if float(p["cash"]) < cost:
         return R(err=f"健身需要 {logic.fmt_money(cost)} 元（年卡摊销），余额不足")
-    _cd_set(p, "gym", cd)
-    gain = logic.ri(8, 15)
-    p["cash"] = round(float(p["cash"]) - cost, 2)
+    logic.cd_set(p, "gym", cd)
+    lo = int(logic.cfg_get(cfg, "gym_health_min", 8))
+    hi = int(logic.cfg_get(cfg, "gym_health_max", 15))
+    gain = logic.ri(lo, hi)
+    p["cash"] = round(max(0.0, float(p["cash"]) - cost), 2)
     p["health"] = round(float(p["health"]) + gain, 1)
     p["mind"] = round(float(p["mind"]) + logic.ri(2, 6), 1)
-    _clamp_status(p)
+    logic.clamp_status(p)
     await asyncio.to_thread(db.save_player, p)
     line = logic.pick(gd.t("life", "gym"))
     return R(
@@ -117,7 +91,7 @@ async def gym(db, gid, uid, nickname, cfg):
 
 
 async def move_house(db, gid, uid, nickname, keyword, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     kw = (keyword or "").strip()
     if not kw:
         hs = [h for h in gd.houses() if h["i"] != 7]
@@ -141,11 +115,20 @@ async def move_house(db, gid, uid, nickname, keyword, cfg):
             text="租房可选："
             + "、".join(f"{h_['name']}(押金{h_['deposit']})" for h_ in hs),
         )
+    if int(p.get("house_owned") or 0) == 1:
+        return R(
+            err="你已经全款拿下「自购小窝」了（房租0元，每日恢复+40），无需再租房！"
+        )
+    # 优先数字索引；其它按 houses.json 名称子串匹配（取第一个）。
+    # 单一来源 houses.json：以前在 HOUSE_KEYS 里写死的别名表已删除。
     target_i = None
-    for word, idx in HOUSE_KEYS:
-        if word in kw or kw == str(idx):
-            target_i = idx
-            break
+    if kw.isdigit() and 0 <= int(kw) <= 11:
+        target_i = int(kw)
+    if target_i is None:
+        for h_ in gd.houses():
+            if kw in h_["name"]:
+                target_i = h_["i"]
+                break
     if target_i is None:
         return R(err=f"没有叫「{kw}」的房子，发送「租房」查看房源列表")
     cur = gd.house(int(p["house"]))
@@ -180,16 +163,16 @@ async def move_house(db, gid, uid, nickname, keyword, cfg):
 
 
 async def stall(db, gid, uid, nickname, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     cd = float(logic.cfg_get(cfg, "stall_cooldown_hours", 6)) * 3600
-    if not _exempt(cfg, uid) and _cd_left(p, "stall") > 0:
+    if not logic.is_exempt(cfg, uid) and logic.cd_left(p, "stall") > 0:
         return R(
-            err=f"摊位还热乎着呢，冷却中：{logic.fmt_remaining(_cd_left(p, 'stall'))}"
+            err=f"摊位还热乎着呢，冷却中：{logic.fmt_remaining(logic.cd_left(p, 'stall'))}"
         )
-    _cd_set(p, "stall", cd)
-    if random.random() < 0.2:
+    logic.cd_set(p, "stall", cd)
+    if random.random() < float(logic.cfg_get(cfg, "stall_fail_rate", 0.2)):
         p["mind"] = round(float(p["mind"]) - 5, 1)
-        _clamp_status(p)
+        logic.clamp_status(p)
         await asyncio.to_thread(db.save_player, p)
         line = logic.pick(gd.t("life", "stall_fail"))
         return R(
@@ -203,8 +186,12 @@ async def stall(db, gid, uid, nickname, cfg):
             },
             text=f"摆摊失败：{line}",
         )
-    side_mult = 1 + (int(p.get("side_lvl") or 1) - 1) * 0.2
-    income = round((logic.ri(10, 60) + int(p["exp"]) // 100 * 5) * side_mult, 2)
+    per_level = float(logic.cfg_get(cfg, "side_hustle_bonus_per_level", 0.2))
+    side_mult = 1 + (int(p.get("side_lvl") or 1) - 1) * per_level
+    lo = int(logic.cfg_get(cfg, "stall_income_min", 10))
+    hi = int(logic.cfg_get(cfg, "stall_income_max", 60))
+    exp_bonus = float(logic.cfg_get(cfg, "stall_exp_bonus_per_100", 5))
+    income = round((logic.ri(lo, hi) + int(p["exp"]) // 100 * exp_bonus) * side_mult, 2)
     p["cash"] = round(float(p["cash"]) + income, 2)
     await asyncio.to_thread(db.save_player, p)
     line = logic.pick(gd.t("life", "stall_income"))
@@ -261,7 +248,7 @@ async def shop_page():
 
 
 async def shop_buy(db, gid, uid, nickname, keyword, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     kw = (keyword or "").strip()
     if not kw:
         return R(err="想买什么？例如：「购买 红牛」或「购买 3」，发送「商店」查看货架")
@@ -270,11 +257,16 @@ async def shop_buy(db, gid, uid, nickname, keyword, cfg):
         target_id = int(kw)
         item = next((x for x in gd.shop_items() if x["id"] == target_id), None)
     if item is None:
+        # 精确名匹配优先
         item = next((x for x in gd.shop_items() if x["name"] == kw), None)
     if item is None:
+        # 子串匹配只接受「唯一候选」，否则把全部候选列出来让用户改发
         matches = [x for x in gd.shop_items() if kw in x["name"]]
         if len(matches) == 1:
             item = matches[0]
+        elif len(matches) > 1:
+            names = " / ".join(f"「{x['name']}」" for x in matches[:6])
+            return R(err=f"「{kw}」匹配到多个道具：{names}，请发更精确的名称")
     if item is None:
         return R(err=f"店里没有「{kw}」这个东西，发送「商店」看看货架吧")
     price = float(item["price"])
@@ -283,15 +275,14 @@ async def shop_buy(db, gid, uid, nickname, keyword, cfg):
     p["cash"] = round(float(p["cash"]) - price, 2)
     if item.get("type") == "card":
         # 道具卡入背包
-        import json as _json
-        bag = _json.loads(p.get("items") or "{}")
+        bag = json.loads(p.get("items") or "{}")
         ckey = item.get("card_key", str(item["id"]))
         bag[ckey] = int(bag.get(ckey, 0)) + 1
-        p["items"] = _json.dumps(bag)
+        p["items"] = json.dumps(bag)
     else:
         p["health"] = round(float(p["health"]) + item.get("health", 0), 1)
         p["mind"] = round(float(p["mind"]) + item.get("mind", 0), 1)
-        _clamp_status(p)
+        logic.clamp_status(p)
     await asyncio.to_thread(db.save_player, p)
     eff_text = []
     if item.get("type") == "card":
@@ -321,7 +312,7 @@ async def shop_buy(db, gid, uid, nickname, keyword, cfg):
 
 async def resume(db, gid, uid, nickname, app_id: str = ""):
     p = await asyncio.to_thread(db.get_player, gid, uid, nickname)
-    comp = gd.company_by_id(int(p["company"]))
+    comp = await asyncio.to_thread(gd.resolve_company, int(p["company"]), db)
     pos = gd.position(int(p["lvl"]))
     pos_list = gd.positions()
     nxt = pos_list[int(p["lvl"]) + 1] if int(p["lvl"]) + 1 < len(pos_list) else None
@@ -375,24 +366,18 @@ async def resume(db, gid, uid, nickname, app_id: str = ""):
     )
 
 
-COMMUTE_MODES = {
-    "地铁": (3.0, -2, -1, 0.15),
-    "公交": (2.0, -1, -2, 0.18),
-    "骑车": (1.5, 2, 0, 0.20),
-    "打车": (25.0, 0, 4, 0.05),
-}
-
-
 async def set_commute(ctx_db, gid, uid, mode):
+    modes = gd.commute_modes()
+    names = " / ".join(modes)
     mode = (mode or "").strip()
     if not mode:
         p = await asyncio.to_thread(ctx_db.get_player, gid, uid)
-        cur = str(p.get("commute") or "地铁")
-        lines = []
-        for name, (cost, hp, md, late) in COMMUTE_MODES.items():
-            lines.append(
-                f"「{name}」单程 {cost} 元｜健康{hp:+g} 精神{md:+g}｜迟到率 {int(late * 100)}%"
-            )
+        cur = str(p.get("commute") or next(iter(modes)))
+        lines = [
+            f"「{name}」单程 {m['cost']:g} 元｜健康{m['health']:+g} 精神{m['mind']:+g}"
+            f"｜迟到率 {m['late_rate'] * 100:g}%"
+            for name, m in modes.items()
+        ]
         return R(
             tmpl="panel",
             data={
@@ -400,16 +385,16 @@ async def set_commute(ctx_db, gid, uid, mode):
                 "title": f"通勤方案（当前：{cur}）",
                 "accent": "#7fd1ff",
                 "lines": lines,
-                "foot": "发送「通勤 地铁 / 公交 / 骑车 / 打车」切换，每天打卡时自动生效",
+                "foot": f"发送「通勤 {names}」切换，每天打卡时自动生效",
             },
-            text="通勤可选：" + "、".join(COMMUTE_MODES),
+            text="通勤可选：" + "、".join(modes),
         )
-    if mode not in COMMUTE_MODES:
-        return R(err="通勤方式仅支持：地铁 / 公交 / 骑车 / 打车")
+    if mode not in modes:
+        return R(err=f"通勤方式仅支持：{names}")
     p = await asyncio.to_thread(ctx_db.get_player, gid, uid)
     p["commute"] = mode
     await asyncio.to_thread(ctx_db.save_player, p)
-    cost, hp, md, late = COMMUTE_MODES[mode]
+    m = modes[mode]
     return R(
         tmpl="panel",
         data={
@@ -417,11 +402,11 @@ async def set_commute(ctx_db, gid, uid, mode):
             "title": f"已切换通勤方式：{mode}",
             "accent": "#6fe08c",
             "blocks": [
-                {"label": "单程花费", "value": f"{cost} 元"},
-                {"label": "体感", "value": f"健康{hp:+g} 精神{md:+g}"},
+                {"label": "单程花费", "value": f"{m['cost']:g} 元"},
+                {"label": "体感", "value": f"健康{m['health']:+g} 精神{m['mind']:+g}"},
                 {
                     "label": "迟到率",
-                    "value": f"{int(late * 100)}%（迟到当日薪资打8折）",
+                    "value": f"{m['late_rate'] * 100:g}%（迟到当日薪资按配置折扣计薪）",
                 },
             ],
             "foot": "明天打卡时自动按新路线通勤",
@@ -431,17 +416,18 @@ async def set_commute(ctx_db, gid, uid, mode):
 
 
 async def nap(db, gid, uid, nickname, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     if int(p["company"]) == -1:
         return R(err="失业人士想睡多久睡多久，不需要午休指令")
     now = time.time()
-    # 距离下一个本地零点的秒数
-    lt = time.localtime(now)
-    secs_passed = lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec
-    if not _exempt(cfg, uid) and _cd_left(p, "nap") > 0:
+    if not logic.is_exempt(cfg, uid) and logic.cd_left(p, "nap") > 0:
         return R(err="一天只能午休一次，下午靠咖啡续命吧")
-    _cd_set(p, "nap", max(60, 86400 - int(secs_passed)))
-    caught = random.random() < 0.15
+    # CD 设置到「下一个 00:00 之后 60s」：过零点意味着新一天自动解锁，
+    # 不再出现 23:59 午休 → 30 秒后又合法的小窗口。
+    lt = time.localtime(now)
+    secs_to_midnight = 86400 - (lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec)
+    logic.cd_set(p, "nap", secs_to_midnight + 60)
+    caught = random.random() < float(logic.cfg_get(cfg, "nap_caught_rate", 0.15))
     if caught:
         p["mind"] = round(float(p["mind"]) - 2, 1)
         line = logic.pick(gd.t("life", "nap_caught"))
@@ -457,7 +443,7 @@ async def nap(db, gid, uid, nickname, cfg):
             {"label": "精神", "value": f"+{gain}（当前 {p['mind']}）"},
             {"label": "健康", "value": "+1"},
         ]
-    _clamp_status(p)
+    logic.clamp_status(p)
     await asyncio.to_thread(db.save_player, p)
     return R(
         tmpl="panel",
@@ -473,23 +459,24 @@ async def nap(db, gid, uid, nickname, cfg):
 
 
 async def team_building(db, gid, uid, nickname, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     if int(p["company"]) == -1:
         return R(err="失业人士没有团建，只有自由的空气")
-    if not _exempt(cfg, uid) and _cd_left(p, "teambuild") > 0:
+    if not logic.is_exempt(cfg, uid) and logic.cd_left(p, "teambuild") > 0:
         return R(
-            err=f"刚被团建完，缓一缓：剩余 {logic.fmt_remaining(_cd_left(p, 'teambuild'))}"
+            err=f"刚被团建完，缓一缓：剩余 {logic.fmt_remaining(logic.cd_left(p, 'teambuild'))}"
         )
-    _cd_set(p, "teambuild", 7 * 86400)
+    logic.cd_set(p, "teambuild", 7 * 86400)
 
     ev = logic.pick(gd.t("life", "teambuild"))
-    spend = int(ev.get("cash", 0))
+    # 文案里 cash 字段缺失或异常时按 0 处理；非正数也钳到 0，避免「垫付负数 = 报销反向」账目错位
+    spend = max(0, int(ev.get("cash", 0) or 0))
     p["cash"] = round(max(0.0, float(p["cash"]) - spend), 2)
     p["health"] = float(p["health"]) + ev.get("health", 0)
     p["mind"] = float(p["mind"]) + ev.get("mind", 0)
     exp_gain = int(ev.get("exp", 1))
     p["exp"] = int(p["exp"]) + exp_gain
-    _clamp_status(p)
+    logic.clamp_status(p)
     await asyncio.to_thread(db.save_player, p)
     if spend:
         await asyncio.to_thread(
@@ -519,18 +506,23 @@ async def team_building(db, gid, uid, nickname, cfg):
 
 
 async def shopping(db, gid, uid, nickname, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
-    if not _exempt(cfg, uid) and _cd_left(p, "shopping") > 0:
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
+    if not logic.is_exempt(cfg, uid) and logic.cd_left(p, "shopping") > 0:
         return R(
-            err=f"钱包还在流泪，冷静一下：剩余 {logic.fmt_remaining(_cd_left(p, 'shopping'))}"
+            err=f"钱包还在流泪，冷静一下：剩余 {logic.fmt_remaining(logic.cd_left(p, 'shopping'))}"
         )
-    _cd_set(p, "shopping", 6 * 3600)
+    logic.cd_set(p, "shopping", 6 * 3600)
 
-    budget = random.choices([99, 299, 999], weights=[60, 30, 10])[0]
+    budgets = list(logic.cfg_get(cfg, "shopping_budgets", [99, 299, 999]) or [99, 299, 999])
+    weights = list(logic.cfg_get(cfg, "shopping_weights", [60, 30, 10]) or [60, 30, 10])
+    # 配置写歪时退回等权，避免 random.choices 抛异常后变成永久兜底
+    if len(weights) != len(budgets):
+        weights = [1.0] * len(budgets)
+    budget = random.choices(budgets, weights=weights)[0]
     roll = random.random()
     if roll < 0.15:
         shipping = round(budget * 0.1, 2)
-        p["cash"] = round(float(p["cash"]) - shipping, 2)
+        p["cash"] = round(max(0.0, float(p["cash"]) - shipping), 2)
         p["mind"] = round(float(p["mind"]) + 5, 1)
         note, title, accent = (
             f"凑单失误后成功退货，只花了运费 {shipping} 元",
@@ -566,7 +558,7 @@ async def shopping(db, gid, uid, nickname, cfg):
             db.add_transaction, gid, uid, "购物", -budget, note[:40]
         )
         outcome = "normal"
-    _clamp_status(p)
+    logic.clamp_status(p)
     await asyncio.to_thread(db.save_player, p)
     return R(
         tmpl="panel",
@@ -591,12 +583,13 @@ async def shopping(db, gid, uid, nickname, cfg):
 
 
 async def buy_house(db, gid, uid, nickname, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     if int(p.get("house_owned") or 0) == 1:
         return R(err="你已经有自己的小窝了，还想买第二套？炒房行为不予支持")
     price = float(logic.cfg_get(cfg, "house_price", 100000))
     fund_pool = float(p.get("fund_savings") or 0)
-    offset = round(min(fund_pool, price * 0.3), 2)
+    offset_rate = float(logic.cfg_get(cfg, "house_fund_offset_max_rate", 0.3))
+    offset = round(min(fund_pool, price * offset_rate), 2)
     due = round(price - offset, 2)
     fmt = logic.fmt_money
     if float(p["cash"]) < due:
@@ -644,7 +637,7 @@ async def buy_house(db, gid, uid, nickname, cfg):
 
 async def payslip(db, gid, uid, nickname):
     p = await asyncio.to_thread(db.get_player, gid, uid, nickname)
-    comp = gd.company_by_id(int(p["company"]))
+    comp = await asyncio.to_thread(gd.resolve_company, int(p["company"]), db)
     txs = await asyncio.to_thread(db.recent_transactions, gid, uid, 12)
     rows = []
     for t in reversed(txs):
@@ -701,11 +694,13 @@ async def payslip(db, gid, uid, nickname):
 
 async def train_self(db, gid, uid, nickname, cfg):
     """自费进修班：花现金提升身价与经验。"""
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     cost = max(
-        200,
+        float(logic.cfg_get(cfg, "train_cost_min", 200)),
         round(
-            float(p["value"]) * float(logic.cfg_get(cfg, "train_cost_rate", 0.1)) * 5
+            float(p["value"])
+            * float(logic.cfg_get(cfg, "train_cost_rate", 0.1))
+            * float(logic.cfg_get(cfg, "train_cost_multiplier", 5))
         ),
     )
     if float(p["cash"]) < cost:
@@ -713,11 +708,11 @@ async def train_self(db, gid, uid, nickname, cfg):
             err=f"报名进修班需要 {logic.fmt_money(cost)} 元（按当前身价浮动），余额不足"
         )
     cd = int(float(logic.cfg_get(cfg, "train_cooldown_hours", 2.0)) * 3600)
-    if not _exempt(cfg, uid) and _cd_left(p, "jinxiu") > 0:
+    if not logic.is_exempt(cfg, uid) and logic.cd_left(p, "jinxiu") > 0:
         return R(
-            err=f"刚结业一门课，先消化消化：剩余 {logic.fmt_remaining(_cd_left(p, 'jinxiu'))}"
+            err=f"刚结业一门课，先消化消化：剩余 {logic.fmt_remaining(logic.cd_left(p, 'jinxiu'))}"
         )
-    _cd_set(p, "jinxiu", cd)
+    logic.cd_set(p, "jinxiu", cd)
     p["cash"] = round(float(p["cash"]) - cost, 2)
     exp_gain = logic.ri(3, 8)
 
@@ -776,9 +771,8 @@ async def train_self(db, gid, uid, nickname, cfg):
 
 
 async def my_bag(db, gid, uid, nickname, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
-    import json as _json
-    bag = _json.loads(p.get("items") or "{}")
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
+    bag = json.loads(p.get("items") or "{}")
     items_meta = {it.get("card_key", str(it["id"])): it for it in gd.shop_items()}
     rows = []
     for k, cnt in bag.items():
@@ -801,9 +795,8 @@ async def my_bag(db, gid, uid, nickname, cfg):
 
 
 async def use_item(db, gid, uid, nickname, item_name, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
-    import json as _json
-    bag = _json.loads(p.get("items") or "{}")
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
+    bag = json.loads(p.get("items") or "{}")
     item_name = (item_name or "").strip()
     if not item_name:
         return R(err="请指定要使用的道具名，例如：「使用 咖啡续命包」，发送「我的背包」查看持有道具")
@@ -824,7 +817,7 @@ async def use_item(db, gid, uid, nickname, item_name, cfg):
 
     # 消耗道具
     bag[target_key] -= 1
-    p["items"] = _json.dumps(bag)
+    p["items"] = json.dumps(bag)
 
     # 触发道具效果
     msg_lines = []

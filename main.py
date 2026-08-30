@@ -33,6 +33,7 @@ try:
     from .core.db import DB
     from .core.renderer import PlaywrightRenderer
     from .core.stocks import StockMarket
+    from .core.web_auth import hash_password, random_password, random_jwt_secret
     from .handlers import ALL_ROUTES
     from .handlers import install as install_routes
     from .webui.server import WebUIServer
@@ -51,74 +52,184 @@ except ImportError:  # 兼容以文件方式直接加载的旧版内核
     from webui.server import WebUIServer
 
 PLUGIN_NAME = "astrbot_plugin_shangbanzu"
-VERSION = "1.0.0"
+VERSION = "1.0.2"
+
+
+def _fmt_draw_lines(result: dict) -> list:
+    from .core import logic as _logic
+    from .core.lottery import TIER_NAMES, fmt_draw
+
+    lines = [
+        "🎰 一夜暴富梦双色球开奖啦！",
+        f"开奖号码：{fmt_draw(result['number'])}（共 {result['ticket_count']} 注参与）",
+    ]
+    winners = result.get("winners") or []
+    for tier in ("jackpot", "second", "third"):
+        ws = [w for w in winners if w["tier"] == tier]
+        if ws:
+            names = "、".join(
+                f"{w['name']}(+{_logic.fmt_money(w['amount'])})" for w in ws[:6]
+            )
+            more = f" 等 {len(ws)} 人" if len(ws) > 6 else ""
+            lines.append(f"🎉 {TIER_NAMES[tier]}：{names}{more}")
+        else:
+            lines.append(f"{TIER_NAMES[tier]}：无人命中，滚存下期")
+    lines.append(
+        f"本期派奖 {result['paid']} 元，滚存 {result['carry']} 元 —— 头奖越滚越大！"
+    )
+    lines.append("（发送「买彩票 3 7 12 5」自选一注冲击下期）")
+    return lines
 
 
 class Shangbanzu(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
         self.config = config or {}
-        self.db = DB(self._data_dir() / "shangbanzu.db")
+        self.db = DB(self._data_dir() / "shangbanzu.db", cfg=self.config)
         self.ctx = GameCtx(self, self.db, self.config)
         self.renderer = PlaywrightRenderer(
             self._data_dir() / "screenshots",
             scale=float(logic.cfg_get(self.config, "render_scale", 2.0)),
             logger=logger,
+            max_concurrency=int(logic.cfg_get(self.config, "render_max_concurrency", 3)),
+            max_keep=int(logic.cfg_get(self.config, "screenshot_max_keep", 60)),
+            viewport_width=int(logic.cfg_get(self.config, "render_viewport_width", 780)),
+            timeout_ms=int(logic.cfg_get(self.config, "render_timeout_ms", 15000)),
         )
         self.market = StockMarket(self.db, self.config)
         self._webui = None
+        self._push_task = None
+        self._last_cleanup_day = ""
         self.backups = BackupManager(
             self._data_dir() / "shangbanzu.db",
             self._data_dir() / "backups",
             logger,
+            max_keep=int(logic.cfg_get(self.config, "backup_max_keep", 20)),
         )
 
     async def initialize(self):
         await asyncio.to_thread(self.db.init)
+        await asyncio.to_thread(gd.load_all)  # 异步预热并全量载入静态游戏数据至内存
         await asyncio.to_thread(self.market.ensure_seeded)
         if bool(logic.cfg_get(self.config, "webui_enabled", True)):
-            host = str(logic.cfg_get(self.config, "webui_host", "0.0.0.0"))
-            port = int(logic.cfg_get(self.config, "webui_port", 17817))
-            self._webui = WebUIServer(
-                self.db,
-                self.backups,
-                self.market,
-                host,
-                port,
-                VERSION,
-                logger,
-                password=str(logic.cfg_get(self.config, "webui_password", "")),
-                config_data=self.config,
-            )
-            try:
-                await self._webui.start()
-                logger.info(
-                    f"[上班族物语] WebUI(aiohttp) 已启动：http://{host}:{port}"
-                    + (
-                        " 🔒"
-                        if str(logic.cfg_get(self.config, "webui_password", ""))
-                        else ""
-                    )
-                )
-            except PermissionError:
-                logger.warning(
-                    "[上班族物语] WebUI 启动失败：端口 "
-                    f"{port} 被系统保留或被防火墙拦截（WinError 10013）。"
-                    "常见于 Hyper-V/WSL 动态保留端口，请在插件配置中更换 webui_port 后重载。"
-                )
-                self._webui = None
-            except OSError as e:
-                logger.warning(
-                    f"[上班族物语] WebUI 启动失败（端口 {port} 被占用？）：{e}；"
-                    "本次运行将没有 WebUI，其余功能不受影响"
-                )
-                self._webui = None
+            await self._start_webui()
         self._push_task = asyncio.create_task(self._push_loop())
         logger.info(f"[上班族物语] 插件已加载，共注册 {len(ALL_ROUTES)} 条指令路由")
 
+    async def _start_webui(self):
+        host = str(logic.cfg_get(self.config, "webui_host", "127.0.0.1") or "127.0.0.1")
+        port = int(logic.cfg_get(self.config, "webui_port", 17817))
+        stored = str(logic.cfg_get(self.config, "webui_password", "") or "")
+        # 自动密码模式：
+        #   - 未配置（空字符串）
+        #   - 仍是旧 PBKDF2 哈希（pbkdf2$ 前缀）—— 不再做透明升级，老哈希作废
+        # 任一情况都生成临时密码 → 哈希后写回 cfg → 启动 WebUI → 一次性打印到日志
+        bootstrap = False
+        temp_pwd = None
+        if not stored or stored.startswith("pbkdf2$"):
+            temp_pwd = random_password()
+            self.config["webui_password"] = await asyncio.to_thread(
+                hash_password, temp_pwd
+            )
+            stored = self.config["webui_password"]
+            bootstrap = True
+            self.config["_webui_must_change_password"] = True
+            # 立即落盘：不能依赖后面 jwt_secret 分支"恰好需要保存"来兜底持久化，
+            # 否则用户预填过 webui_jwt_secret 时临时密码哈希不落盘，
+            # 每次重启都会重新生成一个新临时密码
+            save = getattr(self.config, "save_config", None)
+            if callable(save):
+                try:
+                    await asyncio.to_thread(save)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"[上班族物语] 持久化临时密码哈希失败：{e}")
+        # 明文提交即哈希：旧部署若直接填了明文，自动哈希化一次（仅识别非 $argon2id$ 与非 pbkdf2$ 字符串）。
+        # 已废弃的 pbkdf2$ 前缀落到上面的 bootstrap 分支处理。
+        elif not stored.startswith("$argon2id$"):
+            self.config["webui_password"] = await asyncio.to_thread(
+                hash_password, stored
+            )
+            stored = self.config["webui_password"]
+            save = getattr(self.config, "save_config", None)
+            if callable(save):
+                try:
+                    await asyncio.to_thread(save)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"[上班族物语] 自动迁移明文密码为哈希失败：{e}")
+        # JWT 签名密钥：首次启动生成 32 字节 hex，持久化到 cfg（重启后旧 JWT 仍可验）
+        jwt_secret = str(self.config.get("webui_jwt_secret") or "")
+        if not jwt_secret:
+            jwt_secret = random_jwt_secret()
+            self.config["webui_jwt_secret"] = jwt_secret
+            save = getattr(self.config, "save_config", None)
+            if callable(save):
+                try:
+                    await asyncio.to_thread(save)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"[上班族物语] 持久化 JWT 密钥失败：{e}")
+        self._webui = WebUIServer(
+            self.db,
+            self.backups,
+            self.market,
+            host,
+            port,
+            self._get_version(),
+            logger,
+            password=stored,
+            config_data=self.config,
+            app_id_getter=lambda: self.ctx.app_id,
+            jwt_secret=jwt_secret,
+            renderer=self.renderer,
+        )
+        try:
+            await self._webui.start()
+            if bootstrap:
+                # 临时密码只在启动瞬间打印一次（明文），配置里存的是 Argon2id 哈希
+                border = "=" * 60
+                msg = (
+                    f"\n{border}\n"
+                    "[上班族物语] WebUI 首次启动：自动生成 18 位临时密码（仅显示一次）。\n"
+                    f"      临时密码：{temp_pwd}\n"
+                    f"      访问地址：http://{host}:{port}\n"
+                    "      用临时密码登录后请立即在「插件配置」页改密。\n"
+                    "      密码以 Argon2id 哈希存储（m=64MiB, t=3, p=4，OWASP 推荐），"
+                    "令牌走 JWT(HS256)+ 服务端会话表(12h TTL)，可单独撤销任意会话。\n"
+                    f"{border}"
+                )
+                logger.warning(msg)
+            logger.info(f"[上班族物语] WebUI(aiohttp) 已启动：http://{host}:{port} 🔒")
+        except PermissionError:
+            logger.warning(
+                "[上班族物语] WebUI 启动失败：端口 "
+                f"{port} 被系统保留或被防火墙拦截（WinError 10013）。"
+                "常见于 Hyper-V/WSL 动态保留端口，请在插件配置中更换 webui_port 后重载。"
+            )
+            self._webui = None
+        except OSError as e:
+            logger.warning(
+                f"[上班族物语] WebUI 启动失败（端口 {port} 被占用？）：{e}；"
+                "本次运行将没有 WebUI，其余功能不受影响"
+            )
+            self._webui = None
+
     async def terminate(self):
-        if getattr(self, "_push_task", None):
+        # 1. 先清指令锁表：卸载后没有人能再新来；持锁中的旧协程按自身退出自然释放。
+        #    （清早于 WebUI/渲染器/DB 关闭，与 slave_market 的卸载顺序约定一致）
+        locks = getattr(self, "_player_locks", None)
+        if locks is not None:
+            try:
+                locks.clear()
+            except Exception:  # noqa: BLE001
+                logger.warning("[上班族物语] 清理指令锁表异常（已忽略）")
+            self._player_locks = None
+        if self._push_task:
             self._push_task.cancel()
+            try:
+                await self._push_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:  # noqa: BLE001 - 收尾异常不阻断卸载
+                logger.warning(f"[上班族物语] 推送任务收尾异常（已忽略）：{e}")
             self._push_task = None
         if self._webui:
             try:
@@ -136,15 +247,32 @@ class Shangbanzu(Star):
         """定时任务：到点后向开启推送的群发送每日早报，并做每周排行归档。"""
         while True:
             try:
-                await asyncio.sleep(600)
+                # 这个周期同时决定彩票开奖的时间精度（到点后最多晚一个周期）
+                interval = float(
+                    logic.cfg_get(self.config, "push_check_interval_minutes", 10)
+                )
+                await asyncio.sleep(max(30.0, interval * 60))
                 lt = time.localtime()
                 if lt.tm_hour < int(logic.cfg_get(self.config, "push_hour", 8)):
                     continue
-                if bool(logic.cfg_get(self.config, "weekly_archive_enabled", True)):
+                today = logic.today_str()
+                # 归档与清理都是「每天一次」的重活（清理要扫全表并持写锁），
+                # 用日期水位线挡住，否则从推送时间点起每 10 分钟就来一轮
+                if self._last_cleanup_day != today:
+                    self._last_cleanup_day = today
+                    if bool(logic.cfg_get(self.config, "weekly_archive_enabled", True)):
+                        try:
+                            await asyncio.to_thread(self._weekly_archive)
+                        except Exception as e:  # noqa: BLE001 - 归档失败不影响推送
+                            logger.warning(f"[上班族物语] 每周归档失败：{e}")
                     try:
-                        await asyncio.to_thread(self._weekly_archive)
-                    except Exception as e:  # noqa: BLE001 - 归档失败不影响推送
-                        logger.warning(f"[上班族物语] 每周归档失败：{e}")
+                        await asyncio.to_thread(self.db.cleanup_old_data)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(f"[上班族物语] 数据清理异常：{e}")
+                try:
+                    await self._lottery_maybe_draw()
+                except Exception as e:  # noqa: BLE001 - 开奖失败不影响推送
+                    logger.warning(f"[上班族物语] 彩票开奖异常：{e}")
                 await self._daily_push()
             except asyncio.CancelledError:
                 raise
@@ -191,14 +319,71 @@ class Shangbanzu(Star):
         lines.append("（发送「推送」可开关本群推送）")
         return "\n".join(lines)
 
+    async def _lottery_maybe_draw(self):
+        """到达开奖时间且当期有售票时，自动开奖并向购票群播报结果。"""
+        hour = int(logic.cfg_get(self.config, "lottery_draw_hour", 21))
+        lt = time.localtime()
+        if lt.tm_hour < hour:
+            return
+        today = logic.today_str()
+        # 先把昨日及更早的「孤儿奖池」（开奖日到了但无人购票导致永不滚存的余额）
+        # 滚存到今天，否则钱会被永久锁在历史池行里。
+        try:
+            await asyncio.to_thread(self.db.lottery_carry_unsettled_pool, today)
+        except Exception as e:  # noqa: BLE001 - 滚存失败不影响开奖
+            logger.warning(f"[上班族物语] 孤儿奖池滚存失败：{e}")
+        gids = await asyncio.to_thread(self.db.lottery_today_gids, today)
+        if not gids:
+            return
+        row = await asyncio.to_thread(self._lottery_already_drawn, today)
+        if row:
+            return
+
+        from .core.lottery import fmt_draw, make_judge, random_number
+
+        number = random_number()
+        result = await asyncio.to_thread(
+            self.db.lottery_settle, today, number, make_judge(number)
+        )
+        if not result:
+            return
+        logger.info(
+            f"[上班族物语] 双色球开奖 {today}：{fmt_draw(number)}，"
+            f"奖池 {result['pool']} 元，派奖 {result['paid']} 元，滚存 {result['carry']} 元"
+        )
+        # 向当期购票群播报（未在本轮见过消息的群无法定位会话，跳过）
+        lines = _fmt_draw_lines(result)
+        text = "\n".join(lines)
+        for gid in gids:
+            umo = self.ctx.umos.get(str(gid))
+            if not umo:
+                continue
+            try:
+                await self.context.send_message(umo, MessageChain().message(text))
+            except Exception as e:  # noqa: BLE001 - 单群播报失败不阻断
+                logger.warning(f"[上班族物语] 彩票开奖播报失败（{gid}）：{e}")
+
+    def _lottery_already_drawn(self, today):
+        last = self.db.lottery_last_draw()
+        return last and last.get("date") == today
+
     def _weekly_archive(self):
         """每周首次触发时，把上一周各群的财富榜快照写入 archives。"""
+        # 同步方法，由调用方 asyncio.to_thread 包裹
+
         y, w = logic.iso_week()
-        prev = (y, w - 1) if w > 1 else (y - 1, 52)
+        if w > 1:
+            prev = (y, w - 1)
+        else:
+            # 动态计算上一年最后一天的 ISO 周数（可能为 52 或 53）
+            prev_y, prev_w = logic.iso_week(time.mktime((y - 1, 12, 31, 12, 0, 0, 0, 0, -1)))
+            prev = (prev_y, prev_w)
         if self.db.max_archived_week() == prev:
             return
         for gid, _n in self.db.group_ids():
-            top = self.db.top_wealth(gid, 10)
+            top = self.db.top_wealth(
+                gid, int(logic.cfg_get(self.config, "archive_top_n", 10))
+            )
             if not top:
                 continue
             payload = {
@@ -234,8 +419,9 @@ class Shangbanzu(Star):
 
             data.setdefault("plugin_version", self._get_version())
             data.setdefault("astrbot_version", AB_VER)
-            tmpl_str = gd.template_path(template).read_text("utf-8")
-            html = self.renderer.render_template(tmpl_str, data)
+            tmpl_path = gd.template_path(template)
+            tmpl_str = await asyncio.to_thread(tmpl_path.read_text, "utf-8")
+            html = await asyncio.to_thread(self.renderer.render_template, tmpl_str, data)
             return await self.renderer.screenshot(
                 html, name=f"{template}_{int(time.time())}"
             )
@@ -254,15 +440,16 @@ class Shangbanzu(Star):
 
     async def _emit_msg(self, event: AstrMessageEvent, r: dict):
         """把一条 R 结果转成消息：err > img > 模板渲染 > 纯文本。"""
+        max_len = int(logic.cfg_get(self.config, "max_text_length", 1500))
         if r.get("err"):
-            yield event.plain_result(str(r["err"])[:500])
+            yield event.plain_result(str(r["err"])[:max_len])
             return
         img = r.get("img") or (await self._render(r.get("tmpl"), r.get("data") or {}))
         if img:
             yield event.image_result(img)
         else:
             text = str(r.get("text") or "").strip()
-            yield event.plain_result(text[:1500] if text else "（执行完成）")
+            yield event.plain_result(text[:max_len] if text else "（执行完成）")
 
 
 # 安装全部指令路由（handlers/ 目录按业务域维护）

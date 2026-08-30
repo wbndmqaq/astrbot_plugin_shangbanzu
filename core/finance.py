@@ -5,7 +5,6 @@ import math
 import time
 
 from . import logic
-from .career import _load
 from .result import R
 
 
@@ -13,11 +12,11 @@ def _fmt(x):
     return logic.fmt_money(x)
 
 
-def _settle_fund(p):
+def _settle_fund(p, cfg=None):
     today = logic.today_str()
     if p["fund_day"] == today or float(p["fund"]) <= 0:
         return None
-    change = logic.fund_daily_change()
+    change = logic.fund_daily_change(cfg)
     old = float(p["fund"])
     p["fund"] = round(old * (1 + change / 100.0), 2)
     if abs(p["fund"]) < 0.01:
@@ -27,9 +26,9 @@ def _settle_fund(p):
 
 
 async def deposit(db, gid, uid, amount, cfg, nickname=""):
-    p = await _load(db, gid, uid, nickname, cfg)
-    amt = int(amount) if str(amount).lstrip("-").isdigit() else 0
-    if amt <= 0:
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
+    amt = logic.parse_int(amount, lo=1)
+    if amt is None:
         return R(err="请输入正确的存款金额，例如「存款 500」")
     if amt > float(p["cash"]):
         return R(err=f"现金余额不足（当前 {_fmt(p['cash'])} 元）")
@@ -63,7 +62,7 @@ async def deposit(db, gid, uid, amount, cfg, nickname=""):
 
 
 async def deposit_all(db, gid, uid, cfg, nickname=""):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     amt = round(float(p["cash"]), 2)
     if amt <= 0:
         return R(err="你的现金是 0 元，让我存个寂寞")
@@ -92,9 +91,9 @@ async def deposit_all(db, gid, uid, cfg, nickname=""):
 
 
 async def withdraw(db, gid, uid, amount, cfg, nickname=""):
-    p = await _load(db, gid, uid, nickname, cfg)
-    amt = int(amount) if str(amount).isdigit() else 0
-    if amt <= 0:
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
+    amt = logic.parse_int(amount, lo=1)
+    if amt is None:
         return R(err="请输入正确的取款金额，例如「取款 500」")
     if amt > float(p["deposit"]):
         return R(err=f"存款余额不足（当前存款 {_fmt(p['deposit'])} 元）")
@@ -118,10 +117,10 @@ async def withdraw(db, gid, uid, amount, cfg, nickname=""):
 
 
 async def upgrade_credit(db, gid, uid, max_mode, cfg, nickname=""):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     multi = float(logic.cfg_get(cfg, "bank_upgrade_price_multi", 1.2))
     limit_multi = float(logic.cfg_get(cfg, "bank_limit_increase_multi", 1.25))
-    max_times = 99 if max_mode else 1
+    max_times = int(logic.cfg_get(cfg, "credit_upgrade_max_batch", 99)) if max_mode else 1
     spent = 0.0
     upgrades = 0
     while upgrades < max_times and float(p["cash"]) >= float(p["bank_upgrade_price"]):
@@ -162,7 +161,7 @@ async def upgrade_credit(db, gid, uid, max_mode, cfg, nickname=""):
 
 
 async def bank_info(db, gid, uid, cfg, nickname=""):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     rate = float(logic.cfg_get(cfg, "bank_interest_rate_hourly", 0.01))
     max_h = int(logic.cfg_get(cfg, "bank_max_interest_hours", 24))
     last = int(p["last_interest"] or 0)
@@ -171,7 +170,7 @@ async def bank_info(db, gid, uid, cfg, nickname=""):
     else:
         interest = 0.0
     fund_note = ""
-    settle = _settle_fund(p)
+    settle = _settle_fund(p, cfg)
     if settle and float(p["fund"]) > 0:
         emoji = "📈" if settle["change"] >= 0 else "📉"
         fund_note = f"今日基金{emoji} {settle['change']:+.2f}%"
@@ -204,7 +203,7 @@ async def bank_info(db, gid, uid, cfg, nickname=""):
 
 
 async def collect_interest(db, gid, uid, cfg, nickname=""):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     rate = float(logic.cfg_get(cfg, "bank_interest_rate_hourly", 0.01))
     max_h = int(logic.cfg_get(cfg, "bank_max_interest_hours", 24))
     last = int(p["last_interest"] or 0)
@@ -254,23 +253,43 @@ async def collect_interest(db, gid, uid, cfg, nickname=""):
 
 
 async def transfer(db, gid, me, target, amount, cfg, target_name=""):
-    p = await _load(db, gid, me, "", cfg)
-    td = await _load(db, gid, target, target_name, cfg)
-    amt = int(amount) if str(amount).isdigit() else 0
+    if str(target) == str(me):
+        return R(err="不能给自己转账，左手倒右手没有意义")
+    amt = logic.parse_int(amount, lo=1)
+    if amt is None:
+        return R(err="请输入正确的转账金额，例如「转账 500 @群友」")
     min_amt = int(logic.cfg_get(cfg, "transfer_min_amount", 100))
     if amt < min_amt:
         return R(err=f"转账金额不能低于 {min_amt} 元")
+    p = await logic.load_player(db, gid, me, "", cfg)
+    # 收款人必须是已入档玩家：不能用 get_player 顺手给陌生 ID 建号
+    td = await asyncio.to_thread(db.find_player_any, gid, str(target))
+    if not td:
+        return R(err="对方还没有加入游戏（让 TA 先发一次「上班」），无法转账")
+    target = td["uid"]  # 以库内真实 uid 为准，避免昵称匹配后转错人
     if str(target) == str(me):
         return R(err="不能给自己转账，左手倒右手没有意义")
     fee = math.ceil(amt * float(logic.cfg_get(cfg, "transfer_fee_rate", 0.1)))
     total = amt + fee
     if float(p["cash"]) < total:
         return R(err=f"余额不足：需要 {total} 元（本金 {amt} + 手续费 {fee}）")
-    p["cash"] = round(float(p["cash"]) - total, 2)
-    td["cash"] = round(float(td["cash"]) + amt, 2)
+    # 手续费+本金在同一事务内原子扣除，对方入账本金，防并发双花与中途崩溃丢费
+    ok, reason = await asyncio.to_thread(
+        db.transfer_cash, gid, me, target, float(amt), float(fee)
+    )
+    if not ok:
+        if reason == "no_target":
+            return R(err="对方还没有加入游戏，无法转账")
+        return R(err=f"余额不足：需要 {total} 元（本金 {amt} + 手续费 {fee}）")
+    p = await asyncio.to_thread(db.get_player, gid, me)
+    td = await asyncio.to_thread(db.get_player, gid, target)
     tname = td.get("card") or td["nickname"] or target_name or f"用户{target}"
-    await asyncio.to_thread(db.save_player, p)
-    await asyncio.to_thread(db.save_player, td)
+    await asyncio.to_thread(
+        db.add_transaction, gid, me, "转账(出)", -amt, f"转给 {tname}"
+    )
+    await asyncio.to_thread(
+        db.add_transaction, gid, target, "转账(入)", amt, f"来自 {p.get('card') or p.get('nickname') or me}"
+    )
     return R(
         tmpl="panel",
         data={
@@ -289,10 +308,10 @@ async def transfer(db, gid, me, target, amount, cfg, target_name=""):
 
 
 async def fund_buy(db, gid, uid, amount, cfg, nickname=""):
-    p = await _load(db, gid, uid, nickname, cfg)
-    settle = _settle_fund(p)
-    amt = int(amount) if str(amount).isdigit() else 0
-    if amt <= 0:
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
+    settle = _settle_fund(p, cfg)
+    amt = logic.parse_int(amount, lo=1)
+    if amt is None:
         return R(err="请输入正确的买入金额，例如「买基金 1000」")
     fee = math.ceil(amt * float(logic.cfg_get(cfg, "fund_fee_rate", 0.005)))
     total = amt + fee
@@ -327,20 +346,21 @@ async def fund_buy(db, gid, uid, amount, cfg, nickname=""):
 
 
 async def fund_sell(db, gid, uid, ratio_str, cfg, nickname=""):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     if float(p["fund"]) <= 0:
         return R(err="你还没有持仓，拿什么卖？「买基金」先上车")
-    settle = _settle_fund(p)
+    settle = _settle_fund(p, cfg)
     rs = (ratio_str or "").strip()
     hold = float(p["fund"])
-    if not rs or rs in ("全部", "all"):
+    if not rs or rs in ("全部", "all", "ALL"):
         ratio = 1.0
     elif rs.endswith("%") and rs[:-1].replace(".", "", 1).isdigit():
         ratio = min(1.0, max(0.01, float(rs[:-1]) / 100.0))
-    elif rs.isdigit():
+    elif rs.replace(".", "", 1).isdigit():
         ratio = min(1.0, max(0.01, float(rs) / 100.0))
     else:
-        ratio = 1.0
+        # 认不出来就报错。以前这里默认 1.0，导致「卖出基金 abc」直接清仓
+        return R(err="赎回比例格式不对，可用：「卖出基金」「卖出基金 全部」「卖出基金 50」「卖出基金 50%」")
     sell_amount = round(hold * ratio, 2)
     fee = round(sell_amount * float(logic.cfg_get(cfg, "fund_fee_rate", 0.005)), 2)
     income = round(max(0.0, sell_amount - fee), 2)

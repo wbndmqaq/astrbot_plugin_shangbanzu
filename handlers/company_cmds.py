@@ -2,38 +2,32 @@
 
 from ..core import career, life, social
 from ..core.result import R
-from .base import Route
-
-GID_HINT = "该游戏只能在群聊中使用"
-
-
-def _gid(event):
-    return event.get_group_id() or ""
+from .base import GID_HINT, Route, gid_of
 
 
 async def negotiate(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     return await career.negotiate_salary(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def train_self(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     return await life.train_self(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def colleagues(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
-    return await social.market_list(ctx.db, gid, ctx.app_id)
+    return await social.market_list(ctx.db, gid, ctx.app_id, ctx.config)
 
 
 ROUTES = [

@@ -11,6 +11,20 @@
 <div class="scroll-progress" id="scrollProgress"></div>
 <div class="toast-box" id="toastBox"></div>
 
+<!-- 移动端底部导航（<=768px 显示） -->
+<nav class="bottom-nav" id="bottomNav" aria-label="主导航">
+  <button class="bn-btn on" data-p="feed" aria-label="实时动态"><span class="bn-ico">📡</span>动态</button>
+  <button class="bn-btn" data-p="rank" aria-label="排行榜"><span class="bn-ico">🏆</span>排行</button>
+  <button class="bn-btn" data-p="search" aria-label="玩家查询"><span class="bn-ico">🔍</span>查询</button>
+  <button class="bn-btn" data-p="stocks" aria-label="股市管理"><span class="bn-ico">📈</span>股市</button>
+  <button class="bn-btn" data-p="backup" aria-label="数据备份"><span class="bn-ico">🗄️</span>备份</button>
+  <button class="bn-btn" data-p="admin" aria-label="玩家管理"><span class="bn-ico">⚙️</span>管理</button>
+  <button class="bn-btn" data-p="cfg" aria-label="插件配置"><span class="bn-ico">🧩</span>配置</button>
+  <button class="bn-btn" data-p="company" aria-label="公司与文案"><span class="bn-ico">🗂️</span>文案</button>
+  <button class="bn-btn" data-p="players" aria-label="玩家列表"><span class="bn-ico">📋</span>列表</button>
+  <button class="bn-btn" data-p="sessions" aria-label="我的会话"><span class="bn-ico">🪪</span>会话</button>
+</nav>
+
 <div class="modal-mask" id="askMask">
   <div class="ask-box" role="dialog" aria-modal="true">
     <div class="ask-ico" id="askIco">⚠️</div>
@@ -34,6 +48,22 @@
   </div>
 </div>
 
+<div class="login-overlay" id="changePwdOverlay">
+  <div class="login-box" id="changePwdCard" style="max-width:420px">
+    <div style="font-size:42px;margin-bottom:8px">🛡️</div>
+    <h2 style="letter-spacing:2px;margin-bottom:4px">修改管理员密码</h2>
+    <p id="cpForced" style="color:var(--gold);font-size:13px;margin-bottom:18px;display:none">
+      ⚠️ 检测到您仍在使用首次启动的临时密码，请立即修改后再继续使用。
+    </p>
+    <input type="password" id="cpOld" placeholder="旧密码" style="width:100%;margin-bottom:8px">
+    <input type="password" id="cpNew" placeholder="新密码（至少 8 位）" style="width:100%;margin-bottom:8px">
+    <input type="password" id="cpNew2" placeholder="再次输入新密码" style="width:100%">
+    <button id="cpSubmit" class="btn" style="width:100%;margin-top:14px" onclick="submitChangePwd(this)">修改密码</button>
+    <p id="cpErr" style="color:var(--red);font-size:13px;margin-top:10px;min-height:20px"></p>
+    <p style="color:var(--sub);font-size:12px;margin-top:8px">密码以 Argon2id 哈希存储（m=64MiB, t=3, p=4，OWASP 推荐），令牌走 JWT(HS256) + 服务端会话表（12h TTL），可单独撤销任意会话。</p>
+  </div>
+</div>
+
 <div class="wrap">
   <div class="hdr">
     <h1>🏢 打工人 · 上班族物语</h1>
@@ -42,6 +72,8 @@
     <span class="chip" id="metaPort">端口 ?</span>
     <span class="chip chip-lock" id="lockBadge" style="display:none">🔒 加密</span>
     <span class="chip" id="liveClock"></span>
+    <span class="chip chip-lock" id="logoutChip" style="display:none;cursor:pointer" onclick="doLogout()" title="退出登录">⎋ 退出</span>
+    <span class="chip chip-lock" id="sessionsChip" style="display:none;cursor:pointer" onclick="toggleSessionsPanel()" title="查看/撤销活跃会话">🪪 会话</span>
   </div>
   <div class="stat-grid" id="statCards"></div>
   <div class="news-banner"><span id="newsText">加载中…</span></div>
@@ -56,10 +88,16 @@
     <button class="nav-btn" data-p="cfg">🧩 插件配置</button>
     <button class="nav-btn" data-p="company">🗂️ 公司与文案</button>
     <button class="nav-btn" data-p="players">📋 玩家列表</button>
+    <button class="nav-btn" data-p="sessions">🪪 我的会话</button>
     <div class="nav-ink"></div>
   </nav>
 
-  <section id="p-feed" class="panel on"><div class="feed-list" id="feedList"></div></section>
+  <section id="p-feed" class="panel on">
+    <div class="row" style="justify-content:flex-end;margin-bottom:8px">
+      <button class="btn ghost" onclick="clearEvents(this)">🧹 清空动态</button>
+    </div>
+    <div class="feed-list" id="feedList"></div>
+  </section>
 
   <section id="p-rank" class="panel">
     <div class="row">
@@ -78,7 +116,7 @@
   <section id="p-search" class="panel">
     <div class="row">
       <select id="groupSel2" style="min-width:180px"></select>
-      <input type="text" id="kwInput" placeholder="用户ID或昵称" style="min-width:240px">
+      <input type="text" id="kwInput" placeholder="用户ID或昵称" autocomplete="off" style="min-width:240px">
       <button class="btn" onclick="doSearch()">查询档案</button>
     </div>
     <div id="searchResult"></div>
@@ -97,7 +135,7 @@
 
   <section id="p-backup" class="panel">
     <div class="row">
-      <input type="text" id="bkLabel" placeholder="备份标签（可选）" style="min-width:220px">
+      <input type="text" id="bkLabel" placeholder="备份标签（可选）" autocomplete="off" style="min-width:220px">
       <button class="btn" onclick="bkCreate()">💾 创建备份</button>
       <button class="btn ghost" onclick="loadBackups()">刷新列表</button>
     </div>
@@ -107,7 +145,7 @@
   <section id="p-admin" class="panel">
     <div class="row">
       <select id="admGroupSel" style="min-width:180px"></select>
-      <input type="text" id="admUid" placeholder="用户ID或昵称" style="min-width:160px">
+      <input type="text" id="admUid" placeholder="用户ID或昵称" autocomplete="off" style="min-width:160px">
       <button class="btn" onclick="admSearch()">查询</button>
     </div>
     <div id="admResult"></div>
@@ -121,6 +159,16 @@
     </div>
     <div class="hint-bar">⚠️ 监听地址/端口修改后需在 AstrBot 中重载插件才会完全生效；访问密码保存后立即生效（留空 = 保持原值）。</div>
     <div id="cfgForm" class="cfg-grid"></div>
+  </section>
+
+  <section id="p-sessions" class="panel">
+    <div class="row">
+      <h3 style="margin:0">🪪 我的会话</h3>
+      <button class="btn ghost" onclick="loadSessions(this)">↻ 刷新</button>
+      <button class="btn red" onclick="revokeAllOtherSessions(this)">⛔ 撤销其他全部</button>
+    </div>
+    <div class="hint-bar">💡 当前登录的浏览器/设备会话。点击「撤销」可立即下线对应设备；当前设备被撤销会自动跳回登录页。改密会强制下线全部会话。</div>
+    <div id="sessionsList"></div>
   </section>
 
   <section id="p-company" class="panel">

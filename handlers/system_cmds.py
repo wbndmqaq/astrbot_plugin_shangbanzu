@@ -1,9 +1,11 @@
 """系统指令路由：帮助、职场早报、四大排行榜。"""
 
+import random
+
 from ..core import gamedata as gd
-from ..core import social
+from ..core import logic, social
 from ..core.result import R
-from .base import Route
+from .base import GID_HINT, Route, gid_of
 
 HELP_FALLBACK = (
     "🏢 打工人·上班族物语\n"
@@ -24,7 +26,11 @@ RANK_KINDS = {
 
 async def help_cmd(ctx, event):
     help_data = gd.t("help", "sections")
-    total_cmds = sum(len(s.get("commands", [])) for s in help_data)
+    section_cmds = sum(len(s.get("commands", [])) for s in help_data)
+    # 与 README/CHANGELOG 一致：用注册表的全量指令数，而不是 help 文本里的样例数。
+    # 延迟导入避免循环依赖（system_cmds 被 __init__.py 加载时 ALL_ROUTES 尚未就绪）。
+    from . import ALL_ROUTES
+    total_cmds = len(ALL_ROUTES)
     webui_port = int(ctx.c("webui_port", 17817))
 
     img = await ctx.render(
@@ -32,6 +38,7 @@ async def help_cmd(ctx, event):
         {
             "sections": help_data,
             "total_cmds": total_cmds,
+            "section_cmds": section_cmds,
             "company_count": len(gd.companies()),
             "webui_port": webui_port,
         },
@@ -57,19 +64,17 @@ async def news(ctx, event):
 
 
 async def rank_board(ctx, event):
-    gid = event.get_group_id() or ""
+    gid = gid_of(event)
     if not gid:
-        return R(err="该游戏只能在群聊中使用")
+        return R(err=GID_HINT)
     word = next((w for w in RANK_KINDS if w in (event.message_str or "")), None)
     if not word:
         return R(err="未知排行榜")
-    return await social.rank_data(ctx.db, gid, RANK_KINDS[word], ctx.app_id)
+    return await social.rank_data(ctx.db, gid, RANK_KINDS[word], ctx.app_id, ctx.config)
 
 
 async def today_event(ctx, event):
-    from ..core import logic
     today = logic.today_str()
-    import random
     events_pool = [
         ("🚀 行业风口来袭", "今日全员打卡收益与经验提升 +30%！站在风口上，猪都能飞！", "#6fe08c"),
         ("🚨 突击大检查", "今日各公司摸鱼被抓概率上升，各位打工人请务必留意领导动向！", "#fc6262"),

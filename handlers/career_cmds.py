@@ -1,137 +1,131 @@
 """职业线指令路由。"""
 
+import re
+
 from ..core import career
 from ..core.result import R
-from .base import Route
-
-GID_HINT = "该游戏只能在群聊中使用"
-
-
-def _gid(event):
-    return event.get_group_id() or ""
+from .base import GID_HINT, Route, gid_of
 
 
 async def find_job(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
-    import re
 
     m = re.search(r"(?:找工作|求职)\s*([^\s#]+)?", event.message_str or "")
     want = (m.group(1) if m and m.group(1) else "").strip()
     return await career.find_job(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config, want
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config, want
     )
 
 
 async def my_company(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     return await career.my_company(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def checkin(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     return await career.checkin(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def slack(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     return await career.slack(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def overtime(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     return await career.overtime(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def take_leave(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     return await career.take_leave(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def promote(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     return await career.promote(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def resign_job(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     return await career.resign_job(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def job_hop(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     return await career.job_hop(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def write_report(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     return await career.write_report(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def comp_leave(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     return await career.take_comp_leave(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def create_company_cmd(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
-    import re
     m = re.search(r"^[#]?(?:创建公司|开公司|创业)\s*(\S+)", event.message_str or "")
     comp_name = (m.group(1) if m else "").strip()
     return await career.create_company(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), comp_name, ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), comp_name, ctx.config
     )
 
 
 async def company_dividend_cmd(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     return await career.company_dividend(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
@@ -169,6 +163,6 @@ ROUTES = [
     Route(r"^[#]?(晋升|升职)$", "cmd_promote", "晋升职级", promote),
     Route(r"^[#]?(辞职|离职)$", "cmd_resign", "辞掉公司工作", resign_job),
     Route(r"^[#]?跳槽$", "cmd_hop", "跳槽换公司", job_hop),
-    Route(r"^[#]?(创建公司|开公司|创业)\s*\S+", "cmd_create_comp", "创业自建公司成为资本家老板", create_company_cmd),
+    Route(r"^[#]?(创建公司|开公司|创业)(?:\s+\S+)?$", "cmd_create_comp", "创业自建公司成为资本家老板", create_company_cmd),
     Route(r"^[#]?(公司分红|领取分红|企业分红)$", "cmd_dividend", "作为公司老板提取企业利润分红", company_dividend_cmd),
 ]

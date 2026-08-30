@@ -1,22 +1,20 @@
-"""扩展生活指令路由第二批。"""
+"""跳槽市场指令路由。"""
 
 import asyncio
 
-from ..core import gamedata as gd
-from ..core import logic
+from ..core import career, logic
 from ..core.result import R
-from .base import Route
-
-GID = "该功能只能在群聊中使用"
+from .base import GID_HINT, Route, gid_of
 
 
 async def job_market(ctx, event):
-    """跳槽市场：查看全部在招公司。"""
-    companies = gd.companies()
+    """跳槽市场：查看全部在招公司（含群友自建公司）。"""
+    gid = gid_of(event)
+    if not gid:
+        return R(err=GID_HINT)
+    companies = await career.hiring_pool(ctx.db, gid)
     companies.sort(key=lambda c: c["min_exp"])
-    p = await asyncio.to_thread(
-        ctx.db.get_player, event.get_group_id(), event.get_sender_id()
-    )
+    p = await asyncio.to_thread(ctx.db.get_player, gid, event.get_sender_id())
     exp = int(p["exp"])
     eligible = [c for c in companies if c["min_exp"] <= exp]
     return R(

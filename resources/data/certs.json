@@ -1,0 +1,8 @@
+{
+  "certs": [
+    { "name": "PMP", "cost": 3000, "exp": 30 },
+    { "name": "CPA", "cost": 5000, "exp": 30 },
+    { "name": "法考", "cost": 4000, "exp": 30 },
+    { "name": "CFA", "cost": 6000, "exp": 30 }
+  ]
+}

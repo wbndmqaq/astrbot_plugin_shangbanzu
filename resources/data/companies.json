@@ -96,7 +96,7 @@
       "tag": "餐饮",
       "salary": 4200,
       "intensity": 5.5,
-      "risk": 1.2,
+      "risk": 0.048,
       "min_exp": 0,
       "desc": "雪王带你飞，柠檬水四季畅销",
       "perks": []
@@ -267,7 +267,7 @@
       "tag": "物流",
       "salary": 5800,
       "intensity": 7.5,
-      "risk": 1.8,
+      "risk": 0.072,
       "min_exp": 0,
       "desc": "快递界的黄埔军校，风雨无阻",
       "perks": []
@@ -288,7 +288,7 @@
       "tag": "物流",
       "salary": 6200,
       "intensity": 7,
-      "risk": 1.2,
+      "risk": 0.048,
       "min_exp": 0,
       "desc": "亚洲一号仓库，自动化程度比你想象的高",
       "perks": []
@@ -319,7 +319,7 @@
       "tag": "新能源",
       "salary": 6800,
       "intensity": 8,
-      "risk": 1.5,
+      "risk": 0.06,
       "min_exp": 0,
       "desc": "国产之光，流水线上的螺丝钉也是光荣的",
       "perks": []
@@ -330,7 +330,7 @@
       "tag": "教育",
       "salary": 6800,
       "intensity": 6,
-      "risk": 1.5,
+      "risk": 0.06,
       "min_exp": 20,
       "desc": "学厨师就来新东方，反正你也不一定当厨师",
       "perks": []
@@ -371,7 +371,7 @@
       "tag": "物业",
       "salary": 7200,
       "intensity": 6.5,
-      "risk": 1.0,
+      "risk": 0.04,
       "min_exp": 80,
       "desc": "物业服务天花板，业主的满意是你的KPI",
       "perks": []
@@ -412,7 +412,7 @@
       "tag": "保险",
       "salary": 7500,
       "intensity": 8,
-      "risk": 3.0,
+      "risk": 0.12,
       "min_exp": 20,
       "desc": "每天早会喊口号，卖出去才是真本事",
       "perks": []
@@ -507,7 +507,7 @@
       "tag": "地产",
       "salary": 8500,
       "intensity": 9.5,
-      "risk": 3.8,
+      "risk": 0.152,
       "min_exp": 30,
       "desc": "真房源真服务，就是头发不太真了",
       "perks": []
@@ -528,7 +528,7 @@
       "tag": "电商",
       "salary": 8800,
       "intensity": 8,
-      "risk": 3.5,
+      "risk": 0.14,
       "min_exp": 60,
       "desc": "坚果界的网红，包装比内容好吃",
       "perks": []
@@ -579,7 +579,7 @@
       "tag": "电商",
       "salary": 9200,
       "intensity": 9,
-      "risk": 2.8,
+      "risk": 0.112,
       "min_exp": 50,
       "desc": "社区团购最后一公里，团长们的指挥官",
       "perks": []
@@ -644,7 +644,7 @@
       "tag": "医疗",
       "salary": 9800,
       "intensity": 7,
-      "risk": 1.5,
+      "risk": 0.06,
       "min_exp": 200,
       "desc": "近视手术界的爱马仕，眼科连锁龙头",
       "perks": []
@@ -675,7 +675,7 @@
       "tag": "教育",
       "salary": 10500,
       "intensity": 8.5,
-      "risk": 5.5,
+      "risk": 0.22,
       "min_exp": 120,
       "desc": "双减之后转型素质教育，卷出新高度",
       "perks": []
@@ -796,7 +796,7 @@
       "tag": "互联网",
       "salary": 13000,
       "intensity": 15,
-      "risk": 6.0,
+      "risk": 0.24,
       "min_exp": 100,
       "desc": "工牌不一样但加班一样，转正遥遥无期",
       "perks": []
@@ -937,7 +937,7 @@
       "tag": "游戏",
       "salary": 16000,
       "intensity": 14,
-      "risk": 4.5,
+      "risk": 0.18,
       "min_exp": 400,
       "desc": "做游戏的人自己都不玩游戏，因为没时间",
       "perks": []
@@ -1036,7 +1036,7 @@
       "tag": "AI",
       "salary": 18500,
       "intensity": 13,
-      "risk": 3.2,
+      "risk": 0.128,
       "min_exp": 600,
       "desc": "语音识别龙头，AI浪潮里的冲浪者",
       "perks": []
@@ -1057,7 +1057,7 @@
       "tag": "新能源",
       "salary": 19500,
       "intensity": 13.5,
-      "risk": 4.2,
+      "risk": 0.168,
       "min_exp": 500,
       "desc": "用户企业的信仰，换电站比加油站多",
       "perks": []
@@ -1138,7 +1138,7 @@
       "tag": "游戏",
       "salary": 25000,
       "intensity": 14,
-      "risk": 2.8,
+      "risk": 0.112,
       "min_exp": 1000,
       "desc": "原神启动！二次元的耶路撒冷",
       "perks": []
@@ -1149,7 +1149,7 @@
       "tag": "金融",
       "salary": 28000,
       "intensity": 17,
-      "risk": 3.0,
+      "risk": 0.12,
       "min_exp": 1200,
       "desc": "投行金字塔尖，年薪百万不是梦（如果你能活到那天）",
       "perks": []

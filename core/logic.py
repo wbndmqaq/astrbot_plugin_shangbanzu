@@ -1,5 +1,6 @@
 """纯函数工具：数值规则、格式化、Elo、段位。"""
 
+import asyncio
 import random
 import time
 from datetime import date
@@ -78,13 +79,24 @@ def tier_of(score: int) -> str:
 
 def elo_change(my: int, opp: int, is_win: bool, k: int = 32) -> int:
     expected = 1 / (1 + 10 ** ((opp - my) / 400))
-    return int(k * ((1 - expected) if is_win else (0 - expected)))
+    diff = int(k * ((1 - expected) if is_win else (0 - expected)))
+    # int() 向零截断在极端分差下会把变化削成 0（赢了不加分/输了不扣分），
+    # 钳到 ±1 保证每场对战积分必有变动
+    if diff == 0:
+        diff = 1 if is_win else -1
+    return diff
 
 
-def fund_daily_change() -> float:
-    """单日基金涨跌幅（百分比），截断在 [-12%, +12%]。"""
-    change = random.gauss(0.2, 4.5)
-    return clamp(change, -12.0, 12.0)
+def fund_daily_change(cfg=None) -> float:
+    """基金单日涨跌幅（百分比）。
+
+    drift 为正意味着长期持有稳赚，是最容易被忽视的通胀口，
+    所以漂移、波动率、单日涨跌停三个参数都开放给运维调。
+    """
+    drift = float(cfg_get(cfg, "fund_drift", 0.2))
+    vol = abs(float(cfg_get(cfg, "fund_volatility", 4.5)))
+    limit = abs(float(cfg_get(cfg, "fund_daily_limit_pct", 12.0)))
+    return clamp(random.gauss(drift, vol), -limit, limit)
 
 
 def interest_of(
@@ -108,9 +120,16 @@ def salary_of(base_salary: float, mult: float) -> float:
     return round(float(base_salary) * float(mult), 0)
 
 
-def daily_pay(salary: float, perf: float, streak: int) -> float:
-    bonus = min(streak, 20) * 0.005
-    return round(salary / 22 * perf * (1 + bonus), 2)
+def workdays(cfg=None) -> int:
+    """月薪折算日薪的工作日数。散落多处，统一从这里取。"""
+    return max(1, int(cfg_get(cfg, "monthly_workdays", 22)))
+
+
+def daily_pay(salary: float, perf: float, streak: int, cfg=None) -> float:
+    cap = int(cfg_get(cfg, "attend_streak_bonus_days", 20))
+    rate = float(cfg_get(cfg, "attend_streak_bonus_rate", 0.005))
+    bonus = min(int(streak), cap) * rate
+    return round(salary / workdays(cfg) * perf * (1 + bonus), 2)
 
 
 def promote_rate(level_index: int, base: float, decay: float) -> float:
@@ -146,3 +165,70 @@ def pick(seq):
 
 def weighted_layoff(risk: float, scale: float) -> bool:
     return random.random() < risk * scale
+
+
+# ==================================================================
+# 玩家状态与冷却辅助工具（统一在此管理，避免跨模块私有调用与重复定义）
+# ==================================================================
+
+async def load_player(db, gid, uid, nickname, cfg):
+    start_cash = float(cfg_get(cfg, "start_cash", 800))
+    return await asyncio.to_thread(db.get_player, gid, uid, nickname, start_cash)
+
+
+def cd_left(p: dict, key: str) -> float:
+    return float(p.get("_cds", {}).get(key, 0)) - time.time()
+
+
+def cd_set(p: dict, key: str, seconds: float | int):
+    p.setdefault("_cds", {})[key] = int(time.time()) + int(seconds)
+
+
+def is_exempt(cfg, uid) -> bool:
+    ids = [str(x) for x in (cfg_get(cfg, "cooldown_exempt_users") or [])]
+    return str(uid) in ids
+
+
+def clamp_status(p: dict):
+    p["health"] = round(clamp(float(p["health"]), 0, 100), 1)
+    p["mind"] = round(clamp(float(p["mind"]), 0, 100), 1)
+
+
+# ==================================================================
+# 用户输入解析：一律走这里，绝不把原始文本喂给 int()/float()
+# ==================================================================
+
+# 金额/数量的最大位数。Python 3.11+ 对 int() 有 4300 位上限，
+# int("1" * 5000) 会直接抛 ValueError 打断指令，所以必须先限长再转换。
+MAX_ARG_DIGITS = 12
+# 单笔金额上限：防止 1e18 这类数值把经济系统冲垮
+MAX_AMOUNT = 1e12
+
+
+def parse_int(text, default=None, lo: int | None = None, hi: int | None = None):
+    """安全解析用户输入的非负整数；非法/超长返回 default。"""
+    s = str(text if text is not None else "").strip()
+    if not s.isdigit() or len(s) > MAX_ARG_DIGITS:
+        return default
+    v = int(s)
+    if lo is not None and v < lo:
+        return default
+    if hi is not None and v > hi:
+        return default
+    return v
+
+
+def parse_amount(text, default=None, lo: float = 0.01, hi: float = MAX_AMOUNT):
+    """安全解析用户输入的金额（支持小数）；非法/越界返回 default。"""
+    s = str(text if text is not None else "").strip()
+    if not s or len(s) > MAX_ARG_DIGITS + 3:
+        return default
+    try:
+        v = float(s)
+    except ValueError:
+        return default
+    if v != v or v in (float("inf"), float("-inf")):  # NaN / inf
+        return default
+    if v < lo or v > hi:
+        return default
+    return round(v, 2)

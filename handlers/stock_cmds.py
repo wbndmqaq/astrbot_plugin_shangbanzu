@@ -1,29 +1,23 @@
 """股票交易指令路由：行情、买入、卖出、持仓。"""
 
 import asyncio
+import re
 
+from ..core import logic
 from ..core.result import R
-from .base import Route
-
-GID_HINT = "该功能只能在群聊中使用"
-
-
-def _gid(event):
-    return event.get_group_id() or ""
+from .base import GID_HINT, Route, gid_of
 
 
 def _fmt(x):
-    from ..core import logic
-
     return logic.fmt_money(x)
 
 
 async def market_overview(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     await ctx.star.market.settle_if_needed()
-    stocks = ctx.star.market.list_stocks(100)
+    stocks = await asyncio.to_thread(ctx.star.market.list_stocks, 100)
 
     up = [s for s in stocks if s["chg"] > 0]
     down = [s for s in stocks if s["chg"] < 0]
@@ -82,18 +76,20 @@ async def market_overview(ctx, event):
 
 
 async def buy_stock(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
-    import re
-
-    m = re.search(r"(?:买股票|买入|炒股)\s+(\S+)\s+(\d+)", event.message_str or "")
+    m = re.search(r"(?:买股票|买入)\s+(\S+)\s+(\d+)", event.message_str or "")
     if not m:
         return R(err="格式：买股票 <代码或名称> <金额>\n例如：买股票 sh600037 5000")
     me = str(event.get_sender_id())
-    key, amt = m.group(1), int(m.group(2))
+    key = m.group(1)
+    min_amt = int(ctx.c("stock_min_buy_amount", 1))
+    amt = logic.parse_int(m.group(2), lo=min_amt)
+    if amt is None:
+        return R(err=f"买入金额需为 {min_amt} ~ 999999999999 之间的整数")
 
-    p = await asyncio.to_thread(ctx.db.get_player, gid, me, ctx.nick(event))
+    p = await asyncio.to_thread(ctx.db.get_player, gid, me, await ctx.anick(event))
     fee_rate = float(ctx.c("stock_fee_rate", 0.005))
     if float(p["cash"]) < amt:
         return R(err=f"现金不足（当前 {_fmt(p['cash'])} 元）")
@@ -102,6 +98,11 @@ async def buy_stock(ctx, event):
         r = await ctx.star.market.buy(gid, me, key, float(amt), fee_rate)
     except ValueError:
         return R(err=f"现金不足（当前 {_fmt(p['cash'])} 元）")
+    if r == "too_many":
+        return R(
+            err=f"持仓只数已达上限（{ctx.c('stock_max_positions', 50)} 只），"
+            "先「卖出 <代码>」腾出仓位"
+        )
     if r is None:
         return R(err=f"没有找到「{key}」这支股票，发送「股市」查看行情列表")
 
@@ -141,13 +142,11 @@ async def buy_stock(ctx, event):
 
 
 async def sell_stock(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
-    import re
-
     m = re.search(
-        r"(?:卖出|卖股票|清仓)\s+(\S+?)(?:\s+(\d+)%)?\s*$",
+        r"(?:卖出|卖股票|清仓)\s+(\S+?)(?:\s+(\d+)\s*%?)?\s*$",
         event.message_str or "",
     )
     if not m:
@@ -156,14 +155,14 @@ async def sell_stock(ctx, event):
         )
     me = str(event.get_sender_id())
     key = m.group(1)
-    ratio = int(m.group(2) or 100)
+    ratio = logic.parse_int(m.group(2), default=100, lo=1, hi=100) if m.group(2) else 100
+    if ratio is None:
+        return R(err="卖出比例需在 1~100 之间")
 
     fee_rate = float(ctx.c("stock_fee_rate", 0.005))
     pos = await ctx.star.market.position_of(gid, me, key)
     if not pos:
         return R(err=f"你没有持有「{key}」的仓位")
-    if ratio <= 0 or ratio > 100:
-        return R(err="卖出比例需在 1~100 之间")
 
     r = await ctx.star.market.sell(gid, me, key, ratio / 100.0, fee_rate)
     if r is None:
@@ -207,7 +206,7 @@ async def sell_stock(ctx, event):
 
 
 async def my_portfolio(ctx, event):
-    gid = _gid(event)
+    gid = gid_of(event)
     if not gid:
         return R(err=GID_HINT)
     await ctx.star.market.settle_if_needed()
@@ -261,14 +260,14 @@ ROUTES = [
         my_portfolio,
     ),
     Route(
-        r"^[#]?(买股票|买入)\s+\S+\s+\d+",
+        r"^[#]?(买股票|买入)\s+\S+\s+\d+$",
         "cmd_buy_stock",
         "按金额买入指定股票（买股票/买入均可）",
         buy_stock,
         priority=1,
     ),
     Route(
-        r"^[#]?(卖出|卖股票|清仓)\s+\S+",
+        r"^[#]?(卖出|卖股票|清仓)(?:\s+\S+)?(?:\s+\d+%?)?$",
         "cmd_sell_stock",
         "卖出股票，可带比例如「卖出 xx 50」",
         sell_stock,

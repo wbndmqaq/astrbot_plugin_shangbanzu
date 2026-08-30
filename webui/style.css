@@ -536,3 +536,151 @@ body.authed .footer-note{animation:fadeUp .55s var(--ease) .3s both}
 .obj-del{padding:1px 10px!important;min-height:26px!important;font-size:11px!important}
 .btn-sm{padding:5px 14px!important;min-height:34px!important;
   font-size:12.5px!important;margin-top:4px;width:fit-content}
+
+
+/* ══════════════════════════════════════════════════════════════
+   多平台适配层（v1.2 起）
+   策略：
+   - 桌面/横屏：现有顶部导航 + 宽表格
+   - 小屏竖屏（<=768px）：底部固定 Tab 栏 + 表格卡片化 + 触控目标放大
+   - 触屏设备：禁用 hover 粘滞（用 :active 反馈）
+   - 浅色模式：跟随系统 prefers-color-scheme
+   ══════════════════════════════════════════════════════════════ */
+
+/* 移动端底部 Tab 栏 */
+.bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:150;
+  display:none;background:rgba(15,23,42,.92);backdrop-filter:blur(18px);
+  border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom));
+  grid-auto-flow:column;grid-auto-columns:1fr}
+.bottom-nav .bn-btn{background:none;border:none;color:var(--sub);
+  font-size:11px;min-height:52px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:3px;cursor:pointer;
+  border-radius:10px;padding:4px 2px;transition:color .2s}
+.bottom-nav .bn-btn .bn-ico{font-size:19px;line-height:1}
+.bottom-nav .bn-btn.on{color:var(--gold);font-weight:700}
+.bottom-nav .bn-btn:active{background:rgba(255,255,255,.07)}
+
+/* 浅色模式：token 覆盖（跟随系统） */
+@media (prefers-color-scheme: light){
+  :root{--bg:#eef2f7;--card:#ffffff;--muted:#e5eaf1;--line:#d3dbe6;
+    --txt:#16203a;--sub:#5b6b84;--blue:#0e7490;--gold:#b45309;
+    --red:#dc2626;--green:#15803d;--violet:#7c3aed}
+  .nav{background:rgba(0,0,0,.03);border-color:var(--line)}
+  .nav button{color:var(--sub)}
+  .nav button.on{color:#fff}
+  .tbl-wrap{box-shadow:0 4px 18px rgba(20,40,80,.08)}
+  th{background:rgba(255,255,255,.96)}
+  .toast-msg,.ask-box,.login-box,.sel-list{background:rgba(255,255,255,.96)}
+  .ask-msg,.kv-item,.help-panel li,.feed-item{color:var(--txt)}
+  .kv-item{background:rgba(0,0,0,.03);color:var(--txt)}
+  .kv-item b{color:var(--blue)}
+  .feed-item{background:var(--card)}
+  .bottom-nav{background:rgba(255,255,255,.94)}
+  input,select,textarea{color:var(--txt)}
+  .bg-aurora{background:radial-gradient(ellipse 900px 600px at 15% -5%,#dfe9f5 0%,transparent 60%),
+    radial-gradient(ellipse 800px 550px at 105% 15%,#e9dff5 0%,transparent 55%),var(--bg)}
+  ::-webkit-scrollbar-thumb{border-color:rgba(255,255,255,.9)}
+}
+
+/* 触屏优化：hover 粘滞改为 active 反馈 */
+@media (hover:none){
+  .stat-card:hover,.feed-item:hover,.cfg-row:hover{transform:none;box-shadow:none}
+  .stat-card:active{transform:translateY(-2px) scale(.99)}
+  .feed-item:active{transform:translateX(4px)}
+  .avatar-lg:hover{transform:none}
+  .sel-opt:hover{background:none}
+  .sel-opt:active{background:rgba(125,211,252,.1)}
+}
+
+/* 小屏竖屏：<=768px */
+@media (max-width:768px){
+  .wrap{padding:var(--sp-4) var(--sp-3) calc(76px + env(safe-area-inset-bottom))}
+  .hdr{gap:var(--sp-2)}
+  .hdr h1{font-size:20px;letter-spacing:1px}
+  .chip{font-size:11px;padding:3px 10px}
+
+  /* 顶部导航隐藏，露出底部栏 */
+  .nav{display:none}
+  .bottom-nav{display:grid}
+
+  /* 统计卡片 2 列 */
+  .stat-grid{grid-template-columns:repeat(2,1fr);gap:10px}
+  .stat-card .num{font-size:20px}
+
+  /* 表格卡片化：thead 隐藏，行变卡片，关键列转行内 label */
+  .tbl-wrap{max-height:none;border:none;background:transparent;backdrop-filter:none;
+    box-shadow:none;border-radius:0;overflow:visible}
+  table,thead,tbody,th,td,tr{display:block}
+  thead{display:none}
+  table{width:100%}
+  tbody{display:flex;flex-direction:column;gap:10px}
+  tr{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:var(--sp-3);display:grid;gap:6px;animation:rowIn .35s var(--ease) both}
+  td{border:none;padding:2px 0;display:flex;gap:8px;align-items:baseline}
+  td::before{content:attr(data-th);color:var(--sub);font-size:11px;flex-shrink:0;
+    min-width:56px;font-weight:600}
+  td.empty-cell::before{content:none}
+  td[colspan]{display:block}
+  td[colspan]::before{content:none}
+  tr .co-id,tr .rank-gold{display:inline-flex;align-items:center;gap:6px}
+
+  /* 行内编辑元素占满整行 */
+  .tx-f,.co-edit,.cfg-in{width:100%;min-height:44px;font-size:15px}
+  .cfg-row{flex-direction:column;align-items:stretch;padding:14px}
+  .cfg-info{min-width:0}
+  .cfg-ctrl{width:100%}
+  .stepper input{flex:1;font-size:15px}
+  .st-btn{width:48px;min-height:48px}
+  .btn,.sub-tab,.tx-file{min-height:44px}
+  .btn{font-size:14px}
+  .row{gap:8px}
+  .row .btn,.row input,.row select{flex:1 1 auto;min-width:0}
+
+  /* 档案卡/信息网格 */
+  .info-grid{grid-template-columns:1fr}
+  .profile-head{flex-wrap:wrap}
+  .kv-item b{font-size:16px}
+  .sel-trigger{min-height:48px}
+  .sub-list,.sub-row{flex-direction:column;align-items:stretch}
+  .sub-row{display:grid;grid-template-columns:1fr auto;gap:6px}
+  .sub-row .tx-f{min-width:0}
+  .obj-del{width:100%}
+
+  /* 弹窗/登录在手机上全屏可用 */
+  .ask-box,.login-box{width:min(440px,94vw);padding:24px 20px}
+  .toast-box{right:12px;bottom:calc(84px + env(safe-area-inset-bottom));left:12px;
+    align-items:stretch}
+  .toast-msg{max-width:none;width:100%}
+
+  /* 缩小过重的装饰动画开销 */
+  .blob{filter:blur(60px);opacity:.18}
+}
+
+/* 大屏加宽内容 */
+@media (min-width:1440px){
+  .wrap{max-width:1320px}
+}
+@media (hover:hover) and (pointer:fine){
+  .tbl-wrap{scrollbar-gutter:stable}
+}
+
+/* 键盘焦点可见（WCAG 2.2 focus appearance） */
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.bottom-nav .bn-btn:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
+
+/* 移动端：文案子对象行、行内删除按钮占满整行 */
+@media (max-width:768px){
+  #txHead th{display:inline-block;font-size:11px;padding:4px 6px;margin:2px;border:1px dashed var(--line);border-radius:6px}
+  #txBody tr{display:block}
+  #txBody td{display:block;width:100%;padding:2px 0;border:none}
+  #txBody td::before{display:block;font-weight:700;margin-bottom:2px}
+  .sub-row{display:flex;flex-wrap:wrap;gap:6px}
+  .sub-row .tx-f{flex:1 1 100%}
+  .sub-row .obj-del,.sub-row .btn-sm{flex:0 0 auto;width:auto}
+  .tx-f.ta1{min-height:60px}
+}
+
+@media (max-width:768px){
+  td .btn,td button{margin-left:auto;width:fit-content;min-height:44px}
+  td[data-th="操作"],td[data-th="操作"]::before{display:flex;align-items:center;gap:8px}
+}

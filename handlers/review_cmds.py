@@ -1,16 +1,17 @@
 """年终考评指令路由。"""
 
+from ..core import review
 from ..core.result import R
-from .base import Route
+from .base import GID_HINT, Route, gid_of
 
 
 async def annual_review(ctx, event):
-    gid = event.get_group_id() or ""
+    gid = gid_of(event)
     if not gid:
-        return R(err="该功能只能在群聊中使用")
-    from ..core.review import annual_review as _ar
-
-    return await _ar(ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config)
+        return R(err=GID_HINT)
+    return await review.annual_review(
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
+    )
 
 
 ROUTES = [

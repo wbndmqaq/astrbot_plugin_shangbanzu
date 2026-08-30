@@ -2,6 +2,21 @@
 "use strict";
 var curKind="wealth",allStk=[];
 function $(s){return document.querySelector(s)}
+/* 移动端表格卡片化：为所有没有 data-th 的 td 补上列名（取自对应 thead th 文本） */
+function stampTableLabels(){
+  if(window.innerWidth>768)return;
+  document.querySelectorAll("table").forEach(function(tb){
+    var heads=Array.from(tb.querySelectorAll("thead th")).map(function(th){
+      return th.textContent.replace(/\s+/g," ").trim()});
+    tb.querySelectorAll("tbody tr").forEach(function(tr){
+      tr.querySelectorAll("td").forEach(function(td,i){
+        if(td.hasAttribute("data-th"))return;
+        if(td.getAttribute("colspan")){td.classList.add("empty-cell");return}
+        if(heads[i])td.setAttribute("data-th",heads[i]);
+      });
+    });
+  });
+}
 function $$(s){return Array.from(document.querySelectorAll(s))}
 function esc(s){return String(s??"").replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function fmtT(ts){var d=new Date(ts*1e3),p=function(n){return String(n).padStart(2,"0")};return p(d.getMonth()+1)+"/"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes())}
@@ -19,6 +34,30 @@ async function jpost(u,body){return api(u,{method:"POST",headers:{"Content-Type"
 /* ===== 登录 ===== */
 function showLogin(){document.getElementById("loginOverlay").classList.add("show")}
 function hideLogin(){document.getElementById("loginOverlay").classList.remove("show")}
+function showChangePwd(force){
+  var ov=document.getElementById("changePwdOverlay");if(!ov)return;
+  ov.classList.add("show");
+  var n=document.getElementById("cpOld"),m=document.getElementById("cpNew"),r=document.getElementById("cpNew2"),e=document.getElementById("cpErr");
+  if(n)n.value="";if(m)m.value="";if(r)r.value="";if(e)e.textContent="";
+  var btn=document.getElementById("cpSubmit"),forced=document.getElementById("cpForced");
+  if(btn){btn.disabled=false;btn.textContent=force?"立即修改并登录":"修改密码"}
+  if(forced)forced.style.display=force?"":"none";
+}
+function hideChangePwd(){var ov=document.getElementById("changePwdOverlay");if(ov)ov.classList.remove("show")}
+async function submitChangePwd(btn){
+  if(btn){btn.disabled=true;btn.textContent="提交中…"}
+  try{
+    var o=document.getElementById("cpOld").value,n=document.getElementById("cpNew").value,n2=document.getElementById("cpNew2").value;
+    if(n.length<8){throw new Error("新密码至少 8 位")}
+    if(n!==n2){throw new Error("两次输入的新密码不一致")}
+    var r=await jpost("/api/auth/change-password",{old_password:o,new_password:n});
+    toast(r.message||"密码已更新","ok");hideChangePwd();
+    // 改密后 epoch 自增，旧 cookie 失效——重新登录
+    try{await jpost("/api/auth/logout",{})}catch(e){}
+    showLogin();
+  }catch(e){var ex=document.getElementById("cpErr");if(ex)ex.textContent=e.message||String(e)}
+  finally{if(btn){btn.disabled=false;btn.textContent="立即修改并登录"}}
+}
 function playEnterFx(){var b=document.body;
   b.classList.remove("authed");void b.offsetWidth;b.classList.add("authed")}
 /* ===== 自定义确认弹窗 ===== */
@@ -59,11 +98,16 @@ async function doLogin(){
   var pwd=document.getElementById("loginPwd");
   btn.disabled=true;btn.textContent="验证中…";
   try{
-    await jpost("/api/auth/login",{password:pwd.value});
+    var lr=await jpost("/api/auth/login",{password:pwd.value});
     card.classList.add("out");
     setTimeout(function(){
       hideLogin();card.classList.remove("out");pwd.value="";
       playEnterFx();toast("解锁成功","ok");loadAll();
+      // 会话 chip 仅在启用密码时显示；首次登录后立即拉一次会话列表
+      var sc=document.getElementById("sessionsChip");
+      if(sc)sc.style.display="inline-flex";
+      loadSessions();
+      if(lr&&lr.must_change_password)showChangePwd(true);
     },430);
   }catch(e){
     document.getElementById("loginErr").textContent="密码错误";
@@ -73,7 +117,17 @@ async function doLogin(){
   }finally{btn.disabled=false;btn.textContent="解 锁"}
 }
 jget("/api/auth/check").then(function(r){
-  if(r.required&&!r.ok)showLogin()}).catch(function(){});
+  if(r.required&&!r.ok)showLogin();
+  var lo=document.getElementById("logoutChip");
+  if(lo)lo.style.display=r.required?"inline-flex":"none";
+  var sc=document.getElementById("sessionsChip");
+  if(sc)sc.style.display=r.required?"inline-flex":"none";
+}).catch(function(){});
+
+async function doLogout(){
+  try{await jpost("/api/auth/logout",{})}catch(e){}
+  location.reload();
+}
 
 /* ===== 星尘 ===== */
 (function(){var box=document.getElementById("starField");if(!box)return;
@@ -83,6 +137,17 @@ jget("/api/auth/check").then(function(r){
     s.style.animationDuration=(2+Math.random()*3).toFixed(1)+"s";
     s.style.width=s.style.height=(Math.random()*2+1).toFixed(1)+"px";
     box.appendChild(s)}})();
+
+/* 动态渲染后自动补列名：tbody 内容全部由 JS 渲染，
+   仅靠 DOMContentLoaded/resize 无法覆盖，用 MutationObserver 兜底（debounce 60ms）。
+   stamp 只写 attribute，不会触发 childList observer，无死循环。 */
+var _stampTimer=null;
+var _stampObserver=new MutationObserver(function(){
+  if(window.innerWidth<=768){
+    if(_stampTimer)clearTimeout(_stampTimer);
+    _stampTimer=setTimeout(stampTableLabels,60)}});
+document.addEventListener("DOMContentLoaded",function(){
+  _stampObserver.observe(document.body,{childList:true,subtree:true})});
 
 /* ===== 滚动进度条 ===== */
 (function(){var bar=document.getElementById("scrollProgress");if(!bar)return;
@@ -107,6 +172,15 @@ setInterval(function(){
   var p=document.getElementById("p-feed");
   if(p&&p.classList.contains("on"))loadOverview()},10000);
 
+/* ===== 清空动态（管理员） ===== */
+async function clearEvents(btn){
+  if(!(await askConfirm("确定清空全部实时动态记录？此操作不可恢复。",{icon:"🧹",title:"清空动态",yes:"确认清空"})))return;
+  if(btn){btn.disabled=true;btn.textContent="清空中…"}
+  try{await jpost("/api/admin/events/clear",{});toast("动态已清空","ok");loadOverview()}
+  catch(e){toast("清空失败："+e.message,"error")}
+  finally{if(btn){btn.disabled=false;btn.textContent="🧹 清空动态"}}
+}
+
 /* ===== 通用空状态 ===== */
 function emptyState(icon,text){return '<div class="empty-state"><div style="font-size:26px;margin-bottom:6px">'+icon+'</div><div>'+esc(text)+'</div></div>'}
 function skeletonRow(){return '<tr><td colspan="5"><div class="skeleton"></div></td></tr>'}
@@ -121,7 +195,6 @@ async function loadMeta(){try{var m=await jget("/api/meta");
   if(lock)lock.style.display=m.auth_required?"inline-flex":"none";
 }catch(e){console.warn(e)}}
 
-/* ===== 总览 ===== */
 /* ===== 总览 ===== */
 function countUp(el,target){
   var start=null,dur=900;
@@ -161,9 +234,11 @@ async function loadOverview(){try{
 
 async function loadGroups(){try{var g=await jget("/api/groups");
   var opts=(g.groups||[]).map(function(x){
-    return '<option value="'+esc(x.gid)+'">'+esc(x.name||("群 "+x.gid))+'（'+x.count+'人）</option>'}).join("");;
+    return '<option value="'+esc(x.gid)+'">'+esc(x.name||("群 "+x.gid))+'（'+x.count+'人）</option>'}).join("");
   ["groupSel","groupSel2","admGroupSel","playerGroupSel"].forEach(function(id){
     var el=document.getElementById(id);if(el)el.innerHTML=opts||'<option value="">暂无群数据</option>'});
+  /* 原生 select 已更新，同步重建自定义下拉（否则选项/文案停留在初始快照） */
+  if(window.rebuildCustomSelects)rebuildCustomSelects();
 }catch(e){}}
 
 async function loadRank(){
@@ -182,13 +257,13 @@ async function loadRank(){
     }).join(""):'<tr><td colspan="4">'+emptyState("📊","该群还没有排行数据")+'</td></tr>';
   }catch(e){b.innerHTML='<tr><td colspan="4">'+emptyState("⚠️","加载失败")+'</td></tr>'}}
 
-function kvItem(l,v){return '<div class="kv-item">'+l+'<b>'+v+'</b></div>'}
+function kvItem(l,v){return '<div class="kv-item">'+esc(l)+'<b>'+v+'</b></div>'}
 function barHtml(l,v,c){var w=Math.max(0,Math.min(100,v));
   setTimeout(function(){document.querySelectorAll(".bar-fill[data-w='"+w+"']").forEach(function(b){b.style.width=w+"%"})},80);
   return '<div class="kv-item">'+l+'<div class="bar-track"><i class="bar-fill" data-w="'+w+'" style="background:'+c+'"></i></div></div>'}
 function profileCardHtml(p){
   return '<div class="profile-card"><div class="profile-head">'
-    +(p.avatar?'<img class="avatar-lg" src="'+p.avatar+'" onerror="this.style.display=\'none\'">':"")
+    +(p.avatar?'<img class="avatar-lg" src="'+esc(p.avatar)+'" onerror="this.style.display=\'none\'">':"")
     +'<div><div style="font-size:18px;font-weight:bold">'+esc(p.nickname)+'</div>'
     +'<div class="muted" style="font-size:12px">'+esc(p.uid)+' · 更新于 '+fmtT(p.updated)+'</div></div></div>'
     +'<div class="info-grid">'
@@ -285,15 +360,56 @@ async function bkRestore(name){if(!(await askConfirm("确定用「"+esc(name)+"�
 async function bkDelete(name){if(!(await askConfirm("确定删除备份「"+esc(name)+"」？删除后无法找回。", {icon:"🗑️",title:"删除备份",yes:"确认删除"})))return;
   try{await jpost("/api/backups/delete",{name:name});toast("已删除","ok");loadBackups()}catch(e){}}
 
-/* ===== 管理 ===== */
+/* ===== 管理（查询 + 编辑 + 删除） ===== */
+var admEdit={gid:"",uid:""};
+var ADM_FIELDS=[["cash","现金"],["deposit","存款"],["health","健康"],["mind","精神"],
+  ["exp","经验"],["salary","月薪"],["fund_savings","公积金"],["comp_leave","调休券"],["value","身价"]];
 async function admSearch(){
   var gid=document.getElementById("admGroupSel")?.value||"";
   var uid=document.getElementById("admUid")?.value?.trim()||"";
   if(!gid||!uid){document.getElementById("admResult").innerHTML=emptyState("🔍","请选择群组并输入关键字");return}
   try{var r=await jget("/api/admin/player?gid="+encodeURIComponent(gid)+"&uid="+encodeURIComponent(uid));
     if(r.error){document.getElementById("admResult").innerHTML=emptyState("🔍",r.error);return}
-    document.getElementById("admResult").innerHTML=profileCardHtml(r.profile||r);
+    var pf=r.profile||r;
+    admEdit={gid:pf.gid,uid:pf.uid};
+    document.getElementById("admResult").innerHTML=profileCardHtml(pf)+adminEditorHtml(pf);
   }catch(e){document.getElementById("admResult").innerHTML=emptyState("⚠️","查询失败")}}
+
+function adminEditorHtml(p){
+  return '<div class="profile-card"><div style="font-weight:bold;margin-bottom:10px;color:var(--gold)">✏️ 数值调整（保存即时生效）</div>'
+    +'<div class="info-grid">'
+    +ADM_FIELDS.map(function(f){
+      return '<div class="kv-item">'+f[1]+'<input type="number" step="any" class="tx-f adm-in" data-k="'+f[0]+'" value="'+esc(String(p[f[0]]))+'"></div>';
+    }).join("")
+    +'</div><div class="row" style="margin-top:12px;margin-bottom:0">'
+    +'<button class="btn" onclick="admSave(this)">💾 保存修改</button>'
+    +'<button class="btn btn-red" onclick="admDelete()">🗑️ 删除该玩家</button>'
+    +'</div></div>';
+}
+async function admSave(btn){
+  if(!admEdit.gid)return;
+  var values={};
+  document.querySelectorAll("#admResult .adm-in").forEach(function(el){
+    var v=parseFloat(el.value);
+    if(!isNaN(v))values[el.dataset.k]=v;
+  });
+  if(btn){btn.disabled=true;btn.textContent="保存中…"}
+  try{
+    var body=Object.assign({gid:admEdit.gid,uid:admEdit.uid},values);
+    await jpost("/api/admin/player/save",body);
+    toast("已保存玩家数据","ok");admSearch();
+  }catch(e){toast("保存失败："+e.message,"error")}
+  finally{if(btn){btn.disabled=false;btn.textContent="💾 保存修改"}}
+}
+async function admDelete(){
+  if(!admEdit.gid)return;
+  if(!(await askConfirm("确定删除玩家 <b>"+esc(admEdit.uid)+"</b> 的全部数据？此操作不可恢复！",{icon:"🗑️",title:"删除玩家",yes:"确认删除"})))return;
+  try{
+    await jpost("/api/admin/player/delete",{gid:admEdit.gid,uid:admEdit.uid});
+    toast("已删除玩家","ok");
+    document.getElementById("admResult").innerHTML=emptyState("🗑️","玩家已删除");
+  }catch(e){toast("删除失败："+e.message,"error")}
+}
 
 /* ===== Tab 切换 ===== */
 document.addEventListener("DOMContentLoaded",function(){
@@ -304,18 +420,41 @@ document.addEventListener("DOMContentLoaded",function(){
     btn.addEventListener("click",function(){
       nav.querySelectorAll(".nav-btn").forEach(function(b){b.classList.remove("on")});
       btn.classList.add("on");moveInk(btn);
-      document.querySelectorAll(".panel").forEach(function(p){p.classList.remove("on")});
-      var t=document.getElementById("p-"+btn.dataset.p);
-      if(t)t.classList.add("on");
-      if(btn.dataset.p==="feed")loadOverview();
-      if(btn.dataset.p==="rank"){if(!document.getElementById("groupSel").value)loadGroups();loadRank()}
-      if(btn.dataset.p==="backup")loadBackups();
-      if(btn.dataset.p==="stocks"){loadGroups().then(loadStocks)}
-      if(btn.dataset.p==="company"){ensureCats();loadCompanies()}
-      if(btn.dataset.p==="cfg")loadCfg();
-      if(btn.dataset.p==="players"){loadGroups().then(function(){loadPlayerList(1)})}
+      switchPanel(btn.dataset.p);
     });
   });
+  function switchPanel(p){
+    document.querySelectorAll(".panel").forEach(function(x){x.classList.remove("on")});
+    var t=document.getElementById("p-"+p);
+    if(t)t.classList.add("on");
+    var bn=document.getElementById("bottomNav");
+    if(bn)bn.querySelectorAll(".bn-btn").forEach(function(b){b.classList.toggle("on",b.dataset.p===p)});
+    var topNav=document.getElementById("mainNav");
+    if(topNav){var tb=topNav.querySelector(".nav-btn[data-p=\""+p+"\"]");
+      topNav.querySelectorAll(".nav-btn").forEach(function(x){x.classList.remove("on")});
+      if(tb){tb.classList.add("on");var ink=topNav.querySelector(".nav-ink");if(ink)moveInk(tb);}}
+    if(p==="feed")loadOverview();
+    if(p==="rank"){loadGroups().then(loadRank)}  /* 等群列表填充后再渲染榜单 */
+    if(p==="backup")loadBackups();
+    if(p==="stocks"){loadGroups().then(loadStocks)}
+    if(p==="company"){ensureCats();loadCompanies()}
+    if(p==="cfg")loadCfg();
+    if(p==="players"){loadGroups().then(function(){loadPlayerList(1)})}
+    if(p==="sessions")loadSessions();
+  }
+  var bottomNav=document.getElementById("bottomNav");
+  if(bottomNav){
+    bottomNav.querySelectorAll(".bn-btn[data-p]").forEach(function(btn){
+      btn.addEventListener("click",function(){
+        bottomNav.querySelectorAll(".bn-btn").forEach(function(b){b.classList.remove("on")});
+        btn.classList.add("on");
+        switchPanel(btn.dataset.p);
+        window.scrollTo({top:0,behavior:"smooth"});
+      });
+    });
+  }
+  window.addEventListener("resize",stampTableLabels);
+  stampTableLabels();
   document.querySelectorAll(".sub-tabs button").forEach(function(btn){
     btn.addEventListener("click",function(){
       document.querySelectorAll(".sub-tabs button").forEach(function(b){b.classList.remove("on")});
@@ -364,16 +503,24 @@ function renderCfg(){
     }else if(tp==="list"){
       ctrl='<textarea class="cfg-in" data-k="'+k+'" data-tp="list" rows="2" placeholder="每行一个，逗号分隔亦可">'+esc(Array.isArray(v)?v.join("\n"):String(v==null?"":v))+'</textarea>';
     }else{
+      // 隐藏键（密码 / JWT 密钥）：表单上以明文文本框展示，方便 operator
+      // 直接覆盖输入；后端保存时会立即哈希，存储永远不会是明文。
       var hid=cfgHidden.indexOf(k)>=0;
-      ctrl='<input type="'+(hid?"password":"text")+'" class="cfg-in" data-k="'+k+'" data-tp="string"'
-        +(hid?' placeholder="已设置 · 输入新值修改，留空不变" autocomplete="new-password"':'')
+      ctrl='<input type="text" class="cfg-in" data-k="'+k+'" data-tp="string"'
+        +(hid?' placeholder="留空保持不变，输入新值立即生效" autocomplete="off"':'')
         +' value="'+esc(hid?"":String(v==null?(m.default==null?"":m.default):v))+'">';
     }
     return '<div class="cfg-row" style="animation-delay:'+(i*35)+'ms"><div class="cfg-info">'
-      +'<span class="cfg-name">'+esc(m.description||k)+'</span><span class="cfg-key">'+esc(k)+' · '+esc(tp)+'</span>'
+      +'<span class="cfg-name">'+
+        esc(m.description && m.description !== k ? m.description : k)+
+        '</span>'+
+      '<span class="cfg-key">'+esc(k)+' · '+esc(tp)+'</span>'+
+      (m.description && m.description !== k
+        ? ''
+        : ' <span style="font-size:11px;color:var(--muted,#888);margin-left:6px">(缺中文标签)</span>')
       +(m.hint?'<div class="cfg-hint">'+esc(m.hint)+'</div>':"")
       +'</div><div class="cfg-ctrl">'+ctrl+'</div></div>';
-  }).join(""):'<tr>'+emptyState("🧩","暂无配置项")+'</tr>';
+  }).join(""):emptyState("🧩","暂无配置项");
   box.querySelectorAll(".st-btn").forEach(bindStepper);
 }
 function bindStepper(btn){
@@ -413,7 +560,9 @@ async function saveCfg(btn){
   });
   try{
     var r=await jpost("/api/admin/config/save",{values:values});
-    toast(r.persisted===false?"已应用但未能持久化":"已保存 "+r.applied+" 项配置","ok");
+    var msg=r.persisted===false?"已应用但未能持久化":"已保存 "+r.applied+" 项配置";
+    if(r.notes&&r.notes.length)msg+="；"+r.notes.join("；");
+    toast(msg,r.notes&&r.notes.length?"warn":"ok");
     loadCfg();
   }catch(e){toast("保存失败："+e.message,"error")}
   finally{if(btn){btn.disabled=false;btn.textContent="💾 保存配置"}}
@@ -445,7 +594,7 @@ function renderCompanies(){
   if(cnt)cnt.textContent="共 "+companyData.length+" 家 · 显示 "+list.length+" 家";
   b.innerHTML=list.length?list.map(function(c){
     return '<tr>'
-      +'<td class="co-id">#'+String(c.id).padStart(3,"0")+'</td>'
+      +'<td class="co-id">'+(Number(c.id)>0?'#'+String(c.id).padStart(3,"0"):'新')+'</td>'
       +'<td style="min-width:150px">'+coInput(c,"name")+'</td>'
       +'<td style="min-width:76px">'+coInput(c,"tag")+'</td>'
       +'<td style="min-width:86px">'+coInput(c,"salary","num")+'</td>'
@@ -495,8 +644,12 @@ document.addEventListener("DOMContentLoaded",function(){
   }
 });
 function coAdd(){
-  var max=companyData.reduce(function(m,c){return Math.max(m,c.id)},0);
-  companyData.push({id:max+1,name:"新公司"+(max+1),tag:"综合",salary:3500,
+  // 草稿行用【负数】临时 ID：整张表是按 id 做行标识的（data-id / coDel），
+  // 所以必须唯一；同时后端只认 id>0 为既有公司，负数一律当新行处理。
+  // 早先用 max+1 会在删掉某公司后撞上它的旧 ID，把它的员工划给新公司。
+  var min=companyData.reduce(function(m,c){return Math.min(m,Number(c.id)||0)},0);
+  var tmp=min-1;
+  companyData.push({id:tmp,name:"新公司"+(companyData.length+1),tag:"综合",salary:3500,
     intensity:5,risk:0.01,min_exp:0,desc:"",perks:[]});
   coFilter="";var s=document.getElementById("coSearch");if(s)s.value="";
   renderCompanies();toast("已添加草稿行，点击「保存全部」生效","warn");
@@ -674,7 +827,6 @@ function renderTx(){
         +' —— 发送时自动替换成玩家昵称，<b style="color:var(--red)">请勿删除花括号</b>';
     }else ph.style.display="none";
   }
-  var allStr=items.every(function(x){return typeof x==="string"});
   var delBtn='<button class="btn btn-red" style="padding:4px 12px;min-height:32px" onclick="delTxRow(IDX)">删除</button>';
   if(allStr&&items.length){
     if(hd)hd.innerHTML='<th style="width:64px">#</th><th>内容（一行一条）</th><th style="text-align:right;width:76px">操作</th>';
@@ -755,6 +907,86 @@ async function loadPlayerList(page){
 function nextPage(){if(plPage<plTotal)loadPlayerList(plPage+1)}
 function prevPage(){if(plPage>1)loadPlayerList(plPage-1)}
 
+/* ===== 我的会话（JWT + 服务端会话表） ===== */
+function _relTime(ts){
+  var dt=Math.floor(Date.now()/1e3)-ts;if(dt<60)return dt+" 秒前";
+  if(dt<3600)return Math.floor(dt/60)+" 分钟前";
+  if(dt<86400)return Math.floor(dt/3600)+" 小时前";
+  return Math.floor(dt/86400)+" 天前";
+}
+function _shortUA(ua){
+  ua=String(ua||"未知设备");
+  // 简易归类：浏览器 / 系统
+  var browser=/Edg\//.test(ua)?"Edge":/Chrome\//.test(ua)?"Chrome":/Firefox\//.test(ua)?"Firefox":/Safari\//.test(ua)?"Safari":/bot|crawl|spider/i.test(ua)?"Bot":"浏览器";
+  var os=/Windows NT/.test(ua)?"Windows":/Mac OS X|macOS/.test(ua)?"macOS":/Android/.test(ua)?"Android":/iPhone|iPad|iOS/.test(ua)?"iOS":/Linux/.test(ua)?"Linux":"未知系统";
+  return browser+" · "+os;
+}
+async function loadSessions(btn){
+  if(btn){btn.disabled=true;btn.textContent="加载中…"}
+  var box=document.getElementById("sessionsList");
+  if(box)box.innerHTML='<div class="skeleton" style="height:120px"></div>';
+  try{
+    var r=await jget("/api/auth/sessions");
+    var list=r.sessions||[];
+    if(!list.length){if(box)box.innerHTML=emptyState("🪪","当前没有活跃会话");return}
+    var rows=list.map(function(s){
+      var cur=s.current?'<span class="chip" style="background:var(--gold);color:#000;margin-left:8px">当前设备</span>':"";
+      return '<div class="profile-card" style="margin-bottom:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">'
+        +'<div style="flex:1;min-width:240px">'
+        +'<div style="font-weight:bold">'+esc(_shortUA(s.user_agent))+' '+cur+'</div>'
+        +'<div class="muted" style="font-size:12px;margin-top:4px">IP '+esc(s.ip||"?")+' · 创建 '+fmtT(s.created_at)+' · 最后活跃 '+esc(_relTime(s.last_seen_at))+'</div>'
+        +'</div>'
+        +'<div><button class="btn btn-red" data-jti="'+esc(s.jti)+'" data-current="'+(s.current?"1":"0")+'" onclick="revokeSession(this)">⛔ 撤销</button></div>'
+        +'</div>';
+    }).join("");
+    if(box)box.innerHTML=rows;
+  }catch(e){
+    if(box)box.innerHTML=emptyState("⚠️","加载失败："+esc(e.message||String(e)));
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent="↻ 刷新"}
+  }
+}
+async function revokeSession(btn){
+  var jti=btn.dataset.jti,isCurrent=btn.dataset.current==="1";
+  var msg=isCurrent
+    ?"确定撤销当前设备的会话？撤销后需重新登录。"
+    :"确定下线该设备？该设备的浏览器将立即失去访问权限。";
+  if(!(await askConfirm(msg,{icon:"⛔",title:isCurrent?"撤销当前会话":"撤销其他会话",yes:"撤销",danger:true})))return;
+  try{
+    var r=await jpost("/api/auth/sessions/revoke",{jti:jti});
+    toast(isCurrent?"已撤销，请重新登录":"已撤销该会话","ok");
+    if(isCurrent){
+      // 服务端已 del_cookie；前端重新拉登录页
+      setTimeout(function(){location.reload()},420);
+    }else{
+      loadSessions();
+    }
+  }catch(e){toast("撤销失败："+e.message,"error")}
+}
+async function revokeAllOtherSessions(btn){
+  if(!(await askConfirm("将撤销当前设备之外的全部会话（其他浏览器/设备立即下线），确定？",{icon:"⛔",title:"撤销其他会话",yes:"全部撤销",danger:true})))return;
+  if(btn){btn.disabled=true;btn.textContent="撤销中…"}
+  try{
+    var r=await jget("/api/auth/sessions");
+    var list=r.sessions||[];
+    var others=list.filter(function(s){return !s.current});
+    for(var i=0;i<others.length;i++){
+      try{await jpost("/api/auth/sessions/revoke",{jti:others[i].jti})}catch(e){}
+    }
+    toast("已撤销 "+others.length+" 个其他会话","ok");
+    loadSessions();
+  }catch(e){toast("批量撤销失败："+e.message,"error")}
+  finally{if(btn){btn.disabled=false;btn.textContent="⛔ 撤销其他全部"}}
+}
+function toggleSessionsPanel(){
+  // 切到 sessions 面板（chip 走与 nav-btn 一致的路径）
+  var nav=document.getElementById("mainNav");
+  if(nav){
+    var btn=nav.querySelector('.nav-btn[data-p="sessions"]');
+    if(btn)btn.click();
+  }
+}
+
 loadAll();
 
 /* ===== 自定义下拉组件 ===== */
@@ -801,5 +1033,33 @@ function initCustomSelects(){
 function closeAllDropdowns(except){
   document.querySelectorAll(".sel-wrap.open").forEach(function(w){
     if(w!==except)w.classList.remove("open");
+  });
+}
+
+/* 群数据异步加载后重建自定义下拉的选项与文案（initCustomSelects 只做首帧快照） */
+function rebuildCustomSelects(){
+  document.querySelectorAll(".sel-wrap").forEach(function(wrap){
+    var sel=wrap.querySelector("select");if(!sel)return;
+    var trigger=wrap.querySelector(".sel-trigger"),list=wrap.querySelector(".sel-list");
+    if(!trigger||!list)return;
+    var opts=Array.from(sel.options).map(function(o){
+      return{value:o.value,text:o.textContent,selected:o.selected}});
+    var label=opts.find(function(o){return o.selected});
+    trigger.querySelector(".sel-label").textContent=label?label.text:(opts[0]?opts[0].text:"请选择");
+    list.innerHTML=opts.map(function(o){
+      return '<div class="sel-opt'+(o.selected?' sel':'')+'" data-v="'+esc(o.value)+'">'
+        +esc(o.text)+'</div>';
+    }).join("");
+    list.querySelectorAll(".sel-opt").forEach(function(opt){
+      opt.addEventListener("click",function(e){
+        e.stopPropagation();
+        sel.value=opt.dataset.v;
+        sel.dispatchEvent(new Event("change",{bubbles:true}));
+        list.querySelectorAll(".sel-opt").forEach(function(o){o.classList.remove("sel")});
+        opt.classList.add("sel");
+        trigger.querySelector(".sel-label").textContent=opt.textContent;
+        closeAllDropdowns();
+      });
+    });
   });
 }

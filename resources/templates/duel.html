@@ -30,21 +30,17 @@ body { font-family:"Microsoft YaHei","PingFang SC",sans-serif;
 .kv .lab { color:#8a93b5; font-size:11.5px; }
 .kv .val { color:#eef2ff; font-size:14.5px; font-weight:bold; margin-top:2px; word-break:break-all; }
 
-.tmpl-footer {
-  text-align:center; color:#8a93b5; font-size:12.5px;
-  margin-top:14px; line-height:1.6;
-}
 </style>
 </head>
 <body>
   <div class="vs">
     <div class="fighter">
-      <div class="avwrap">{% if a and a.avatar %}<img src="{{ a.avatar }}">{% elif a and a.name %}<div class="avf">{{ a.name[:1] }}</div>{% else %}<div class="avf">?</div>{% endif %}</div>
+      <div class="avwrap">{% if a and a.avatar %}<img src="{{ a.avatar }}" alt="" onerror="this.remove()">{% elif a and a.name %}<div class="avf">{{ a.name[:1] }}</div>{% else %}<div class="avf">?</div>{% endif %}</div>
       <div class="nm">{{ a.name if a and a.name else '选手A' }}</div>
     </div>
     <div class="vstag">VS</div>
     <div class="fighter">
-      <div class="avwrap">{% if b and b.avatar %}<img src="{{ b.avatar }}">{% elif b and b.name %}<div class="avf">{{ b.name[:1] }}</div>{% else %}<div class="avf">?</div>{% endif %}</div>
+      <div class="avwrap">{% if b and b.avatar %}<img src="{{ b.avatar }}" alt="" onerror="this.remove()">{% elif b and b.name %}<div class="avf">{{ b.name[:1] }}</div>{% else %}<div class="avf">?</div>{% endif %}</div>
       <div class="nm">{{ b.name if b and b.name else '选手B' }}</div>
     </div>
   </div>

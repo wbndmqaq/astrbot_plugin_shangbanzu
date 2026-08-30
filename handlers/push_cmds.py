@@ -3,15 +3,13 @@
 import asyncio
 
 from ..core.result import R
-from .base import Route
-
-GID = "该功能只能在群聊中使用"
+from .base import GID_HINT, Route, gid_of
 
 
 async def toggle_push(ctx, event):
-    gid = event.get_group_id() or ""
+    gid = gid_of(event)
     if not gid:
-        return R(err=GID)
+        return R(err=GID_HINT)
     cur = await asyncio.to_thread(ctx.db.push_enabled, gid)
     await asyncio.to_thread(ctx.db.set_push, gid, not cur)
     state = "已开启" if not cur else "已关闭"
@@ -33,9 +31,9 @@ async def toggle_push(ctx, event):
 
 
 async def push_status(ctx, event):
-    gid = event.get_group_id() or ""
+    gid = gid_of(event)
     if not gid:
-        return R(err=GID)
+        return R(err=GID_HINT)
     on = await asyncio.to_thread(ctx.db.push_enabled, gid)
     groups = await asyncio.to_thread(ctx.db.push_group_ids)
     return R(

@@ -2,35 +2,35 @@
 
 from ..core import extra2
 from ..core.result import R
-from .base import Route
-
-GID = "该功能只能在群聊中使用"
+from .base import GID_HINT, Route, gid_of
 
 
 async def party(ctx, event):
-    gid = event.get_group_id() or ""
+    gid = gid_of(event)
     if not gid:
-        return R(err=GID)
+        return R(err=GID_HINT)
     return await extra2.party_lottery(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def lend(ctx, event):
-    gid = event.get_group_id() or ""
+    gid = gid_of(event)
     if not gid:
-        return R(err=GID)
+        return R(err=GID_HINT)
     me = str(event.get_sender_id())
     ats = ctx.ats(event)
     nums = ctx.nums(event, ("借钱", "借"))
-    target = (ats[0] if ats else None) or (
-        nums[0] if nums and nums[0].isdigit() and len(nums[0]) >= 5 else ""
-    )
-    amount = nums[-1] if nums else "0"
-    if not target:
-        return R(err="请@要借钱的群友，如：借钱 @群友 500")
+    if ats:
+        target, amount = ats[0], (nums[0] if nums else "0")
+    elif len(nums) >= 2:
+        # 无 @ 时必须「ID + 金额」两个数字，否则「借钱 12345」会把同一个
+        # token 既当收款人又当金额，变成给用户 12345 借 12345 元
+        target, amount = nums[0], nums[1]
+    else:
+        return R(err="请@要借钱的群友，如：借钱 @群友 500（或「借钱 12345678 500」）")
     return await extra2.lend_money(
-        ctx.db, gid, me, target, amount, ctx.config, ctx.nick(event, target)
+        ctx.db, gid, me, target, amount, ctx.config, await ctx.anick(event, target)
     )
 
 
@@ -39,35 +39,40 @@ async def advice(ctx, event):
 
 
 async def workstation(ctx, event):
-    gid = event.get_group_id() or ""
+    gid = gid_of(event)
     if not gid:
-        return R(err=GID)
+        return R(err=GID_HINT)
     return await extra2.upgrade_workstation(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def ot_meal(ctx, event):
-    gid = event.get_group_id() or ""
+    gid = gid_of(event)
     if not gid:
-        return R(err=GID)
+        return R(err=GID_HINT)
     return await extra2.overtime_meal(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 async def checkup(ctx, event):
-    gid = event.get_group_id() or ""
+    gid = gid_of(event)
     if not gid:
-        return R(err=GID)
+        return R(err=GID_HINT)
     return await extra2.health_checkup(
-        ctx.db, gid, event.get_sender_id(), ctx.nick(event), ctx.config
+        ctx.db, gid, event.get_sender_id(), await ctx.anick(event), ctx.config
     )
 
 
 ROUTES = [
     Route(r"^[#]?(年会抽奖|年会)$", "cmd_party", "年会抽奖（每年限一次）", party),
-    Route(r"^[#]?借钱\s+\S+", "cmd_lend", "借钱 @群友 N（可能收不回来）", lend),
+    Route(
+        r"^[#]?借钱(?:\s+\S+)?(?:\s+\d+)?$",
+        "cmd_lend",
+        "借钱 @群友 N（可能收不回来）",
+        lend,
+    ),
     Route(r"^[#]?(职场建议|建议)$", "cmd_advice", "随机职场生存建议", advice),
     Route(
         r"^[#]?(工位升级|升级工位)$",

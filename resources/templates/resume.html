@@ -34,15 +34,11 @@ body { font-family:"Microsoft YaHei","PingFang SC",sans-serif;
 .bar { height:9px; background:rgba(255,255,255,.08); border-radius:999px; overflow:hidden; }
 .bar i { display:block; height:100%; border-radius:999px; }
 
-.tmpl-footer {
-  text-align:center; color:#8a93b5; font-size:12.5px;
-  margin-top:14px; line-height:1.6;
-}
 </style>
 </head>
 <body>
   <div class="profile">
-    {% if me and me.avatar %}<img class="avatar" src="{{ me.avatar }}">{% elif me and me.name %}<div class="avf">{{ me.name[:1] }}</div>{% else %}<div class="avf">?</div>{% endif %}
+    {% if me and me.avatar %}<img class="avatar" src="{{ me.avatar }}" alt="" onerror="this.remove()">{% elif me and me.name %}<div class="avf">{{ me.name[:1] }}</div>{% else %}<div class="avf">?</div>{% endif %}
     <div class="pinfo">
       <h1>{{ me.name if me and me.name else '打工人' }} 的简历</h1>
       <div class="sub">ID：{{ me.id if me and me.id else '-' }}</div>

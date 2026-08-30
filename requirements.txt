@@ -1,6 +1,12 @@
-# 独立 Playwright 渲染器 + aiohttp WebUI + Jinja2 模板
+# 独立 Playwright 渲染器 + aiohttp WebUI + Jinja2 模板 + JWT + Argon2id
 # 安装插件依赖后，还需执行一次浏览器内核安装：
 #   python -m playwright install chromium
-playwright>=1.40
-aiohttp>=3.8
-jinja2>=3.0
+#
+# 上界锁到下一个大版本：这几个库都有过破坏性变更（Playwright 的
+# BrowserContext API、aiohttp 4 的中间件/Response 改动、Jinja2 的 autoescape 行为、
+# argon2-cffi 的 hash format 参数变更），不设上界等于把插件能否启动交给上游发版节奏。
+playwright>=1.40,<2
+aiohttp>=3.8,<4
+jinja2>=3.0,<4
+argon2-cffi>=23.1,<24
+pyjwt>=2.8,<3

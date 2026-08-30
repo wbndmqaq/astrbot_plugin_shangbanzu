@@ -6,11 +6,11 @@ import time
 
 from . import gamedata as gd
 from . import logic
-from .career import R, _load
+from .result import R
 
 
 async def annual_review(db, gid, uid, nickname, cfg):
-    p = await _load(db, gid, uid, nickname, cfg)
+    p = await logic.load_player(db, gid, uid, nickname, cfg)
     if int(p["company"]) == -1:
         return R(err="失业人士没有年终考评，先找工作吧")
 
@@ -24,38 +24,44 @@ async def annual_review(db, gid, uid, nickname, cfg):
     skills = p.get("_skills", [])
     social = int(p.get("social_pts") or 0)
 
-    # 综合评分
-    score = exp * 2 + streak * 5 + len(skills) * 20 + social * 3 + lvl * 50
-    roll = random.random()
-    score = round(score * (0.8 + roll * 0.4))
+    # 综合评分：五项权重可配（默认与老版本一致）
+    def c(key, default):
+        return float(logic.cfg_get(cfg, key, default))
 
-    if score >= 800:
-        grade, grade_name = "S", "传奇打工者"
-        bonus_mult = 3.0
-        raise_pct = 0.15
-        color, icon = "#ffd86f", "👑"
-    elif score >= 500:
-        grade, grade_name = "A", "优秀员工"
-        bonus_mult = 2.0
-        raise_pct = 0.10
-        color, icon = "#6fe08c", "🌟"
-    elif score >= 300:
-        grade, grade_name = "B", "合格员工"
-        bonus_mult = 1.0
-        raise_pct = 0.05
-        color, icon = "#7fd1ff", "📋"
-    elif score >= 150:
-        grade, grade_name = "C", "待改进"
-        bonus_mult = 0.3
-        raise_pct = 0.0
-        color, icon = "#ffb86f", "⚠️"
-    else:
-        grade, grade_name = "D", "绩效不达标"
-        bonus_mult = 0.0
-        raise_pct = 0.0
-        color, icon = "#fc6262", "🔴"
+    score = (
+        exp * c("review_weight_exp", 2)
+        + streak * c("review_weight_streak", 5)
+        + len(skills) * c("review_weight_skill", 20)
+        + social * c("review_weight_social", 3)
+        + lvl * c("review_weight_level", 50)
+    )
+    score = round(score * (0.8 + random.random() * 0.4))
 
-    comp = gd.company_by_id(int(p["company"]))
+    # 档位阈值 + 年终奖倍数 + 调薪幅度。这是全插件最大的通胀杠杆
+    # （S 级一次给数倍月薪现金 **且永久涨薪**），必须让运维能压制。
+    tiers = [
+        ("S", "传奇打工者", "review_grade_s_threshold", 800,
+         "review_bonus_multi_s", 3.0, "review_raise_s", 0.15, "#ffd86f", "👑"),
+        ("A", "优秀员工", "review_grade_a_threshold", 500,
+         "review_bonus_multi_a", 2.0, "review_raise_a", 0.10, "#6fe08c", "🌟"),
+        ("B", "合格员工", "review_grade_b_threshold", 300,
+         "review_bonus_multi_b", 1.0, "review_raise_b", 0.05, "#7fd1ff", "📋"),
+        ("C", "待改进", "review_grade_c_threshold", 150,
+         "review_bonus_multi_c", 0.3, "review_raise_c", 0.0, "#ffb86f", "⚠️"),
+    ]
+    grade, grade_name = "D", "绩效不达标"
+    bonus_mult = c("review_bonus_multi_d", 0.0)
+    raise_pct = 0.0
+    color, icon = "#fc6262", "🔴"
+    for g, gname, tkey, tdef, mkey, mdef, rkey, rdef, col, ic in tiers:
+        if score >= c(tkey, tdef):
+            grade, grade_name = g, gname
+            bonus_mult = c(mkey, mdef)
+            raise_pct = c(rkey, rdef)
+            color, icon = col, ic
+            break
+
+    comp = await asyncio.to_thread(gd.resolve_company, int(p["company"]), db)
     bonus = round(float(p["salary"]) * bonus_mult, 2)
     old_salary = float(p["salary"])
     if raise_pct > 0:
@@ -64,9 +70,7 @@ async def annual_review(db, gid, uid, nickname, cfg):
     p["review_year"] = year
     p["cash"] = round(float(p["cash"]) + bonus, 2)
     p["total_earned"] = round(float(p.get("total_earned") or 0) + bonus, 2)
-    _clamp = lambda v: max(0, min(100, v))
-    p["health"] = _clamp(float(p["health"]))
-    p["mind"] = _clamp(float(p["mind"]))
+    logic.clamp_status(p)
     await asyncio.to_thread(db.save_player, p)
 
     await asyncio.to_thread(

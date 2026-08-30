@@ -7,7 +7,7 @@ import time
 
 from . import gamedata as gd
 from . import logic
-from .career import R, _cd_left, _cd_set, _clamp_status, _exempt, _load
+from .result import R
 
 GID = "该功能只能在群聊中使用"
 
@@ -17,7 +17,7 @@ def _today():
 
 
 async def meeting(ctx_db, gid, uid, nickname, cfg):
-    p = await _load(ctx_db, gid, uid, nickname, cfg)
+    p = await logic.load_player(ctx_db, gid, uid, nickname, cfg)
     if int(p["company"]) == -1:
         return R(err="失业人士不需要开会")
     today = _today()
@@ -27,7 +27,7 @@ async def meeting(ctx_db, gid, uid, nickname, cfg):
     ev = logic.pick(gd.t("extra3", "meeting"))
     p["mind"] = float(p["mind"]) + ev.get("mind", 0)
     p["exp"] = int(p["exp"]) + ev.get("exp", 0)
-    _clamp_status(p)
+    logic.clamp_status(p)
     await asyncio.to_thread(ctx_db.save_player, p)
     return R(
         tmpl="panel",
@@ -49,16 +49,21 @@ async def meeting(ctx_db, gid, uid, nickname, cfg):
 
 
 async def bring_food(ctx_db, gid, me, target, nickname, cfg, target_name=""):
-    cost = 15
-    p = await _load(ctx_db, gid, me, nickname, cfg)
+    cost = float(logic.cfg_get(cfg, "bring_food_cost", 15.0))
+    p = await logic.load_player(ctx_db, gid, me, nickname, cfg)
     if float(p["cash"]) < cost:
-        return R(err=f"带饭要 {cost} 元，余额不足")
-    td = await _load(ctx_db, gid, target, target_name, cfg)
-    p["cash"] = round(float(p["cash"]) - cost, 2)
+        return R(err=f"带饭要 {logic.fmt_money(cost)} 元，余额不足")
+    # 对方必须是已入档玩家：load_player 会给陌生 ID 顺手建号。
+    # 之前对此已修过一次（P1），本次回归由"加 cfg 参数"时没把守卫一起带过来。
+    td = await asyncio.to_thread(ctx_db.find_player_any, gid, str(target))
+    if not td:
+        return R(err="对方还没有加入游戏（让 TA 先发一次「上班」），帮不上")
+    target = td["uid"]
+    p["cash"] = round(max(0.0, float(p["cash"]) - cost), 2)
     p["social_pts"] = int(p.get("social_pts") or 0) + 2
-    td["mind"] = round(float(td["mind"]) + 5, 1)
     await asyncio.to_thread(ctx_db.save_player, p)
-    await asyncio.to_thread(ctx_db.save_player, td)
+    # 对方精神走原子列更新，防跨用户快照覆盖
+    await asyncio.to_thread(ctx_db.add_mind_atomic, gid, str(target), 5.0)
     tname = td.get("card") or td["nickname"] or target_name or f"用户{target}"
     return R(
         tmpl="panel",
@@ -78,7 +83,7 @@ async def bring_food(ctx_db, gid, me, target, nickname, cfg, target_name=""):
 
 
 async def reply_msg(ctx_db, gid, uid, nickname, cfg):
-    p = await _load(ctx_db, gid, uid, nickname, cfg)
+    p = await logic.load_player(ctx_db, gid, uid, nickname, cfg)
     if int(p["company"]) == -1:
         return R(err="失业人士没有工作消息要回")
     today = _today()
@@ -88,7 +93,7 @@ async def reply_msg(ctx_db, gid, uid, nickname, cfg):
     gain = logic.ri(2, 5)
     p["exp"] = int(p["exp"]) + gain
     p["mind"] = round(max(0, float(p["mind"]) - 3), 1)
-    _clamp_status(p)
+    logic.clamp_status(p)
     await asyncio.to_thread(ctx_db.save_player, p)
     return R(
         tmpl="panel",
@@ -107,7 +112,7 @@ async def reply_msg(ctx_db, gid, uid, nickname, cfg):
 
 
 async def meeting_room(ctx_db, gid, uid, nickname, cfg):
-    p = await _load(ctx_db, gid, uid, nickname, cfg)
+    p = await logic.load_player(ctx_db, gid, uid, nickname, cfg)
     if int(p["company"]) == -1:
         return R(err="失业人士不需要抢会议室")
     today = _today()
@@ -123,7 +128,7 @@ async def meeting_room(ctx_db, gid, uid, nickname, cfg):
     )
     p["exp"] = int(p["exp"]) + ev["exp"]
     p["mind"] = round(float(p["mind"]) + ev["mind"], 1)
-    _clamp_status(p)
+    logic.clamp_status(p)
     await asyncio.to_thread(ctx_db.save_player, p)
     return R(
         tmpl="panel",
@@ -142,18 +147,24 @@ async def meeting_room(ctx_db, gid, uid, nickname, cfg):
 
 
 async def eat_with(ctx_db, gid, me, target, nickname, cfg, target_name=""):
-    cost = random.choice([50, 80, 120])
-    p = await _load(ctx_db, gid, me, nickname, cfg)
-    td = await _load(ctx_db, gid, target, target_name, cfg)
+    raw_costs = logic.cfg_get(cfg, "eat_with_costs", [50, 80, 120])
+    costs = [float(x) for x in (raw_costs or [50, 80, 120])]
+    cost = random.choice(costs or [50.0])
+    p = await logic.load_player(ctx_db, gid, me, nickname, cfg)
+    # 对方必须是已入档玩家，否则一句"和同事吃饭"就会建一条幽灵玩家
+    td = await asyncio.to_thread(ctx_db.find_player_any, gid, str(target))
+    if not td:
+        return R(err="对方还没有加入游戏（让 TA 先发一次「上班」），约不了饭")
+    target = td["uid"]
     if float(p["cash"]) < cost:
-        return R(err=f"吃饭预计 {cost} 元，余额不足")
-    p["cash"] = round(float(p["cash"]) - cost, 2)
+        return R(err=f"吃饭预计 {logic.fmt_money(cost)} 元，余额不足")
+    p["cash"] = round(max(0.0, float(p["cash"]) - cost), 2)
     p["mind"] = round(float(p["mind"]) + 10, 1)
     p["social_pts"] = int(p.get("social_pts") or 0) + 3
-    td["mind"] = round(float(td["mind"]) + 8, 1)
-    _clamp_status(p)
+    logic.clamp_status(p)
     await asyncio.to_thread(ctx_db.save_player, p)
-    await asyncio.to_thread(ctx_db.save_player, td)
+    # 对方精神走原子列更新，防跨用户快照覆盖
+    await asyncio.to_thread(ctx_db.add_mind_atomic, gid, str(target), 8.0)
     tname = td.get("card") or td["nickname"] or target_name or f"用户{target}"
     return R(
         tmpl="panel",
@@ -174,16 +185,21 @@ async def eat_with(ctx_db, gid, me, target, nickname, cfg, target_name=""):
 
 
 async def boss_task(ctx_db, gid, uid, nickname, cfg):
-    p = await _load(ctx_db, gid, uid, nickname, cfg)
+    p = await logic.load_player(ctx_db, gid, uid, nickname, cfg)
     if int(p["company"]) == -1:
         return R(err="失业人士没有领导可以使唤...啊不，可以服务")
-    if not _exempt(cfg, uid) and _cd_left(p, "boss_task") > 0:
+    if not logic.is_exempt(cfg, uid) and logic.cd_left(p, "boss_task") > 0:
         return R(
-            err=f"刚帮领导做完一件事：剩余 {logic.fmt_remaining(_cd_left(p, 'boss_task'))}"
+            err=f"刚帮领导做完一件事：剩余 {logic.fmt_remaining(logic.cd_left(p, 'boss_task'))}"
         )
-    _cd_set(p, "boss_task", 12 * 3600)
-    if random.random() < 0.65:
-        reward = logic.ri(50, 200)
+    logic.cd_set(
+        p, "boss_task", float(logic.cfg_get(cfg, "boss_task_cooldown_hours", 12)) * 3600
+    )
+    if random.random() < float(logic.cfg_get(cfg, "boss_task_success_rate", 0.65)):
+        reward = logic.ri(
+            int(logic.cfg_get(cfg, "boss_task_reward_min", 50)),
+            int(logic.cfg_get(cfg, "boss_task_reward_max", 200)),
+        )
         p["cash"] = round(float(p["cash"]) + reward, 2)
         p["exp"] = int(p["exp"]) + logic.ri(3, 8)
         await asyncio.to_thread(ctx_db.save_player, p)
@@ -201,8 +217,11 @@ async def boss_task(ctx_db, gid, uid, nickname, cfg):
             },
             text=f"帮领导做事成功！奖励 {logic.fmt_money(reward)} 元：{line}",
         )
-    cost = logic.ri(30, 100)
-    p["cash"] = round(max(0, float(p["cash"]) - cost), 2)
+    cost = logic.ri(
+        int(logic.cfg_get(cfg, "boss_task_penalty_min", 30)),
+        int(logic.cfg_get(cfg, "boss_task_penalty_max", 100)),
+    )
+    p["cash"] = round(max(0.0, float(p["cash"]) - cost), 2)
     p["mind"] = round(float(p["mind"]) - 5, 1)
     await asyncio.to_thread(ctx_db.save_player, p)
     line = logic.pick(gd.t("extra3", "boss_task_fail"))
@@ -220,17 +239,22 @@ async def boss_task(ctx_db, gid, uid, nickname, cfg):
 
 
 async def summit(ctx_db, gid, uid, nickname, cfg):
-    p = await _load(ctx_db, gid, uid, nickname, cfg)
-    cost = 500
+    p = await logic.load_player(ctx_db, gid, uid, nickname, cfg)
+    cost = float(logic.cfg_get(cfg, "summit_cost", 500.0))
     if float(p["cash"]) < cost:
-        return R(err=f"行业峰会门票 {cost} 元，余额不足")
-    if not _exempt(cfg, uid) and _cd_left(p, "summit") > 0:
+        return R(err=f"行业峰会门票 {logic.fmt_money(cost)} 元，余额不足")
+    if not logic.is_exempt(cfg, uid) and logic.cd_left(p, "summit") > 0:
         return R(
-            err=f"峰会太频繁也没用：剩余 {logic.fmt_remaining(_cd_left(p, 'summit'))}"
+            err=f"峰会太频繁也没用：剩余 {logic.fmt_remaining(logic.cd_left(p, 'summit'))}"
         )
-    _cd_set(p, "summit", 14 * 86400)
-    p["cash"] = round(float(p["cash"]) - cost, 2)
-    exp_gain = logic.ri(10, 25)
+    logic.cd_set(
+        p, "summit", float(logic.cfg_get(cfg, "summit_cooldown_days", 14)) * 86400
+    )
+    p["cash"] = round(max(0.0, float(p["cash"]) - cost), 2)
+    exp_gain = logic.ri(
+        int(logic.cfg_get(cfg, "summit_exp_min", 10)),
+        int(logic.cfg_get(cfg, "summit_exp_max", 25)),
+    )
     social_gain = logic.ri(3, 8)
     p["exp"] = int(p["exp"]) + exp_gain
     p["social_pts"] = int(p.get("social_pts") or 0) + social_gain
@@ -258,7 +282,7 @@ async def summit(ctx_db, gid, uid, nickname, cfg):
 
 
 async def adopt_pet(ctx_db, gid, uid, nickname, pet_type, cfg):
-    p = await _load(ctx_db, gid, uid, nickname, cfg)
+    p = await logic.load_player(ctx_db, gid, uid, nickname, cfg)
     if p.get("pet"):
         return R(err=f"你已经有宠物了（{p['pet']}），一心不能二用")
     pets = gd.load_all().get("pets", {}).get("pets", [])
@@ -303,7 +327,7 @@ async def pet_interact(ctx_db, gid, uid, nickname):
     p["mind"] = round(float(p["mind"]) + ev.get("mind", 5), 1)
     if ev.get("health"):
         p["health"] = round(float(p["health"]) + ev["health"], 1)
-    _clamp_status(p)
+    logic.clamp_status(p)
     await asyncio.to_thread(ctx_db.save_player, p)
     return R(
         tmpl="panel",
@@ -324,12 +348,12 @@ async def pet_interact(ctx_db, gid, uid, nickname):
 
 
 async def get_cert(ctx_db, gid, uid, nickname, cert_name, cfg):
-    p = await _load(ctx_db, gid, uid, nickname, cfg)
+    p = await logic.load_player(ctx_db, gid, uid, nickname, cfg)
     cert_name = (cert_name or "").strip()
-    certs = {"PMP": 3000, "CPA": 5000, "法考": 4000, "CFA": 6000}
+    certs = gd.certs()
     if cert_name not in certs:
         return R(err=f"可考证书：{' / '.join(certs)}")
-    cost = certs[cert_name]
+    cost = float(certs[cert_name]["cost"])
     if float(p["cash"]) < cost:
         return R(
             err=f"考{cert_name}需要 {logic.fmt_money(cost)} 元（报名+教材+培训），余额不足"
@@ -337,12 +361,14 @@ async def get_cert(ctx_db, gid, uid, nickname, cert_name, cfg):
     skills = p.get("_skills", [])
     if cert_name in skills:
         return R(err=f"你已经考过了{cert_name}")
-    p["cash"] = round(float(p["cash"]) - cost, 2)
-    if random.random() < 0.55:
+    p["cash"] = round(max(0.0, float(p["cash"]) - cost), 2)
+    exp_gain = int(certs[cert_name].get("exp") or 30)
+    value_rate = float(logic.cfg_get(cfg, "cert_value_bonus_rate", 0.1))
+    if random.random() < float(logic.cfg_get(cfg, "cert_pass_rate", 0.55)):
         skills.append(cert_name)
         p["_skills"] = skills
-        p["exp"] = int(p["exp"]) + 30
-        p["value"] = round(float(p["value"]) * 1.1, 2)
+        p["exp"] = int(p["exp"]) + exp_gain
+        p["value"] = round(float(p["value"]) * (1 + value_rate), 2)
         await asyncio.to_thread(ctx_db.save_player, p)
         line = logic.pick(gd.t("extra3", "cert_ok"))
         return R(
@@ -356,12 +382,12 @@ async def get_cert(ctx_db, gid, uid, nickname, cert_name, cfg):
                     {"label": "考试费", "value": f"-{logic.fmt_money(cost)} 元"},
                     {
                         "label": "身价",
-                        "value": f"+10%（当前 {logic.fmt_money(p['value'])}）",
+                        "value": f"+{value_rate * 100:g}%（当前 {logic.fmt_money(p['value'])}）",
                     },
-                    {"label": "经验", "value": "+30"},
+                    {"label": "经验", "value": f"+{exp_gain}"},
                 ],
             },
-            text=f"恭喜通过{cert_name}认证！身价提升10%",
+            text=f"恭喜通过{cert_name}认证！身价提升 {value_rate * 100:g}%",
         )
     line = logic.pick(gd.t("extra3", "cert_fail"))
     await asyncio.to_thread(ctx_db.save_player, p)
@@ -381,7 +407,7 @@ async def get_cert(ctx_db, gid, uid, nickname, cert_name, cfg):
 
 
 async def travel(ctx_db, gid, uid, nickname, cfg):
-    p = await _load(ctx_db, gid, uid, nickname, cfg)
+    p = await logic.load_player(ctx_db, gid, uid, nickname, cfg)
     dests = gd.t("extra3", "travel")
     dest = random.choice(dests)
     if float(p["cash"]) < dest["cost"]:
@@ -391,7 +417,7 @@ async def travel(ctx_db, gid, uid, nickname, cfg):
     p["cash"] = round(float(p["cash"]) - dest["cost"], 2)
     p["mind"] = round(min(100, float(p["mind"]) + dest["mind"]), 1)
     p["health"] = round(min(100, float(p["health"]) + dest["health"]), 1)
-    _clamp_status(p)
+    logic.clamp_status(p)
     await asyncio.to_thread(ctx_db.save_player, p)
     return R(
         tmpl="panel",
