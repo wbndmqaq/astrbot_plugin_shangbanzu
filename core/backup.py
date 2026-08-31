@@ -11,7 +11,9 @@ MAX_KEEP = 20
 
 
 class BackupManager:
-    def __init__(self, db_path: Path, backups_dir: Path, logger=None, max_keep: int = MAX_KEEP):
+    def __init__(
+        self, db_path: Path, backups_dir: Path, logger=None, max_keep: int = MAX_KEEP
+    ):
         self.db_path = Path(db_path)
         self.dir = Path(backups_dir)
         self.log = logger
@@ -32,15 +34,19 @@ class BackupManager:
             seq += 1
             name = f"{base}-{seq}"
         dest_path = self.dir / f"{name}.db"
-        src = sqlite3.connect(self.path(), timeout=15)
-        dest = sqlite3.connect(dest_path, timeout=15)
+        src = None
+        dest = None
         try:
+            src = sqlite3.connect(self.path(), timeout=15)
+            dest = sqlite3.connect(dest_path, timeout=15)
             with _write_lock:
                 src.backup(dest)
                 dest.commit()
         finally:
-            dest.close()
-            src.close()
+            if dest is not None:
+                dest.close()
+            if src is not None:
+                src.close()
         size = dest_path.stat().st_size
         self._log(f"创建备份 {name} ({size // 1024} KB)")
         self.prune()
@@ -129,15 +135,19 @@ class BackupManager:
             return {**item, "error": reason}
         # 用在线 backup API 恢复到运行中的主库，避免直接覆盖文件
         # 与 WAL 日志产生一致性风险
-        src = sqlite3.connect(target, timeout=15)
-        dst = sqlite3.connect(self.path(), timeout=15)
+        src = None
+        dst = None
         try:
+            src = sqlite3.connect(target, timeout=15)
+            dst = sqlite3.connect(self.path(), timeout=15)
             with _write_lock:
                 src.backup(dst)
                 dst.commit()
         finally:
-            dst.close()
-            src.close()
+            if dst is not None:
+                dst.close()
+            if src is not None:
+                src.close()
         self._log(f"恢复备份 {item['name']}")
         return item
 

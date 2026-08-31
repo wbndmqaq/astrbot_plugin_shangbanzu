@@ -97,7 +97,9 @@ class StockMarket:
                     for r in rows:
                         new_price = max(
                             floor_price,
-                            round(float(r["price"]) * (1 + self._random_pct() / 100), 2),
+                            round(
+                                float(r["price"]) * (1 + self._random_pct() / 100), 2
+                            ),
                         )
                         conn.execute(
                             "UPDATE stocks SET prev=price, price=?, day=? WHERE code=?",
@@ -187,12 +189,11 @@ class StockMarket:
                 return None
             fee = round(amount_yuan * fee_rate, 2)
             cost = round(amount_yuan + fee, 2)  # 入账总额 = 本金 + 手续费
-            # 实际入股的金额按扣除手续费后的净额算份额，但 cost 基线记【含费】，
-            # 这样 sell 的 profit = income - 含费均价 与账户上的真实净扣款一致。
-            # （以前只扣本金、cost 记本金，导致手续费既没入账也没入 portfolio，
-            # 玩家每笔买入都会"凭空"留下 fee，相当于全游戏隐形通胀口。）
-            net_amount = round(amount_yuan - fee, 2)
-            shares = round(net_amount / st["price"], 4)
+            # 份额按全额本金算（fee-on-top 模式）：玩家付 amount+fee，
+            # 拿到 amount/price 股；手续费在买入端只收一次。
+            # 之前用 (amount-fee)/price 算份额导致 fee 被扣两次
+            # （现金扣 amount+fee，份额只值 amount-fee），avg_cost 被抬高。
+            shares = round(amount_yuan / st["price"], 4)
             max_pos = int(self._c("stock_max_positions", 50))
             conn = self._conn()
             try:
@@ -219,8 +220,14 @@ class StockMarket:
                             "SELECT ?,?,?,?,? WHERE "
                             "(SELECT COUNT(*) FROM portfolio WHERE gid=? AND uid=? AND shares>0) < ?",
                             (
-                                str(gid), str(uid), st["code"], shares, cost,
-                                str(gid), str(uid), max_pos,
+                                str(gid),
+                                str(uid),
+                                st["code"],
+                                shares,
+                                cost,
+                                str(gid),
+                                str(uid),
+                                max_pos,
                             ),
                         )
                         if inserted.rowcount == 0:
@@ -321,6 +328,7 @@ class StockMarket:
         return await asyncio.to_thread(_do)
 
     async def position_of(self, gid, uid, key: str) -> dict | None:
+        await self.settle_if_needed()
         def _do():
             st = self.get_stock(key)
             if not st:
@@ -346,9 +354,11 @@ class StockMarket:
                 "total_cost": cost,
                 "market_value": round(shares * st["price"], 2),
             }
+
         return await asyncio.to_thread(_do)
 
     async def my_positions(self, gid, uid) -> list[dict]:
+        await self.settle_if_needed()
         def _do():
             conn = self._conn()
             try:
@@ -357,11 +367,14 @@ class StockMarket:
                     "AND shares > 0 ORDER BY cost DESC",
                     (str(gid), str(uid)),
                 ).fetchall()
+                # 一次性批量取行情，避免对每只持仓单独开连接（get_stock）
+                stock_rows = conn.execute("SELECT code, name, price FROM stocks").fetchall()
+                stock_map = {str(r["code"]): r for r in stock_rows}
             finally:
                 conn.close()
             out = []
             for r in rows:
-                st = self.get_stock(r["code"])
+                st = stock_map.get(str(r["code"]))
                 if st:
                     out.append(
                         {
@@ -369,10 +382,11 @@ class StockMarket:
                             "name": st["name"],
                             "shares": round(float(r["shares"]), 4),
                             "cur_price": st["price"],
-                            "market_value": round(float(r["shares"]) * st["price"], 2),
+                            "market_value": round(float(r["shares"]) * float(st["price"]), 2),
                         }
                     )
             return out
+
         return await asyncio.to_thread(_do)
 
     # ---------- 管理端 ----------
@@ -411,7 +425,8 @@ class StockMarket:
             with _write_lock:
                 for r in rows:
                     np_ = round(
-                        max(floor, float(r["price"]) * (1 + self._random_pct() / 100)), 2
+                        max(floor, float(r["price"]) * (1 + self._random_pct() / 100)),
+                        2,
                     )
                     conn.execute(
                         "UPDATE stocks SET prev=price, price=? WHERE code=?",

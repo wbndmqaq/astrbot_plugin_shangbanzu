@@ -19,6 +19,8 @@ async def party_lottery(db, gid, uid, nickname, cfg):
     p["party_year"] = year
 
     prizes = gd.t("extra2", "party_prizes")
+    if not prizes:
+        return R(err="年会奖品池尚未配置，请联系管理员")
     # 四档中奖概率（累积），其余为「谢谢参与」。分桶阈值随奖品表走，不额外开放。
     rates = [
         float(logic.cfg_get(cfg, "party_grand_rate", 0.03)),
@@ -52,15 +54,15 @@ async def party_lottery(db, gid, uid, nickname, cfg):
         gid,
         uid,
         "年会抽奖",
-        f"{p['nickname'] or uid} 年会抽中{prize['rank']}：{prize['text'][:30]}",
+        f"{p['nickname'] or uid} 年会抽中{prize.get('rank', '')}: {str(prize.get('text', ''))[:30]}",
     )
     return R(
         tmpl="panel",
         data={
             "icon": "🎊",
-            "title": f"年会抽奖 · {prize['rank']}",
+            "title": f"年会抽奖 · {prize.get('rank', '未知')}",
             "accent": "#ffd86f" if amount > 100 else "#7fd1ff",
-            "lines": [prize["text"]],
+            "lines": [prize.get("text", "")],
             "blocks": [
                 {
                     "label": "奖品价值",
@@ -141,7 +143,7 @@ async def lend_money(db, gid, me, target, amount, cfg, target_name=""):
     )
 
 
-async def career_advice(ctx_db=None):
+async def career_advice():
     advices = gd.t("extra2", "career_advice")
     tip = logic.pick(advices)
     return R(
@@ -206,7 +208,9 @@ async def overtime_meal(db, gid, uid, nickname, cfg):
             err=f"加班餐一天只能领一次：剩余 {logic.fmt_remaining(logic.cd_left(p, 'ot_meal'))}"
         )
     logic.cd_set(
-        p, "ot_meal", float(logic.cfg_get(cfg, "overtime_meal_cooldown_hours", 24)) * 3600
+        p,
+        "ot_meal",
+        float(logic.cfg_get(cfg, "overtime_meal_cooldown_hours", 24)) * 3600,
     )
     line = logic.pick(gd.t("extra2", "ot_meal"))
     subsidy = min(

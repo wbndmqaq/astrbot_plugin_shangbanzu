@@ -18,12 +18,21 @@ import random
 from . import logic
 from .result import R
 
-RED_MAX = 16   # 红球号码池 1~16
-BLUE_MAX = 8   # 蓝球号码池 1~8
-RED_PICK = 3   # 每注红球个数
+RED_MAX = 16  # 红球号码池 1~16
+BLUE_MAX = 8  # 蓝球号码池 1~8
+RED_PICK = 3  # 每注红球个数
 
 TIER_NAMES = {"jackpot": "一等奖", "second": "二等奖", "third": "三等奖"}
-TIERS = {"jackpot": 0.6, "second": 0.25, "third": 0.15}
+TIERS_DEFAULT = {"jackpot": 0.6, "second": 0.25, "third": 0.15}
+
+
+def _tiers_from_cfg(cfg) -> dict:
+    """从插件配置读取奖金分配比例，缺失时回退默认。"""
+    return {
+        "jackpot": float(logic.cfg_get(cfg, "lottery_jackpot_pct", 0.6)),
+        "second": float(logic.cfg_get(cfg, "lottery_second_pct", 0.25)),
+        "third": float(logic.cfg_get(cfg, "lottery_third_pct", 0.15)),
+    }
 
 
 def fmt_number(red: list, blue: int) -> str:
@@ -47,16 +56,18 @@ def parse_number(s: str):
 
 
 def random_number() -> str:
-    return fmt_number(random.sample(range(1, RED_MAX + 1), RED_PICK),
-                       random.randint(1, BLUE_MAX))
+    return fmt_number(
+        random.sample(range(1, RED_MAX + 1), RED_PICK), random.randint(1, BLUE_MAX)
+    )
 
 
-def make_judge(draw_number: str):
+def make_judge(draw_number: str, cfg=None):
     """生成绑定开奖号的判奖函数，供 db.lottery_settle 调用。"""
     parsed = parse_number(draw_number)
     if parsed is None:
         raise ValueError(f"bad draw number {draw_number}")
     draw_red, draw_blue = parsed
+    tiers = _tiers_from_cfg(cfg) if cfg else TIERS_DEFAULT
 
     def judge(tickets: list, pool: float):
         winners = []
@@ -78,7 +89,7 @@ def make_judge(draw_number: str):
                 tier = "third"
             if tier:
                 buckets.setdefault(tier, []).append(t)
-        for tier, ratio in TIERS.items():
+        for tier, ratio in tiers.items():
             hits = buckets.get(tier) or []
             if not hits:
                 continue
@@ -118,7 +129,9 @@ async def buy_ticket(db, gid, uid, args_str, cfg, nickname=""):
     if remain <= 0:
         return R(err=f"本期（今日）限购 {limit} 注，你已经买满了，明天再来")
 
-    tokens = [t for t in str(args_str or "").replace(",", " ").replace("，", " ").split() if t]
+    tokens = [
+        t for t in str(args_str or "").replace(",", " ").replace("，", " ").split() if t
+    ]
     numbers: list[str] = []
     if not tokens:
         count = 1
@@ -132,9 +145,13 @@ async def buy_ticket(db, gid, uid, args_str, cfg, nickname=""):
         red = [int(x) for x in tokens[:RED_PICK]]
         blue = int(tokens[RED_PICK])
         if len(set(red)) != RED_PICK or any(not (1 <= r <= RED_MAX) for r in red):
-            return R(err=f"红球需为 1~{RED_MAX} 中互不相同的 {RED_PICK} 个号码，例如：「买彩票 3 7 12 5」")
+            return R(
+                err=f"红球需为 1~{RED_MAX} 中互不相同的 {RED_PICK} 个号码，例如：「买彩票 3 7 12 5」"
+            )
         if not (1 <= blue <= BLUE_MAX):
-            return R(err=f"蓝球需为 1~{BLUE_MAX} 的号码，例如：「买彩票 3 7 12 5」（末位为蓝球）")
+            return R(
+                err=f"蓝球需为 1~{BLUE_MAX} 的号码，例如：「买彩票 3 7 12 5」（末位为蓝球）"
+            )
         numbers = [fmt_number(red, blue)]
     else:
         return R(
@@ -171,7 +188,9 @@ async def buy_ticket(db, gid, uid, args_str, cfg, nickname=""):
     )
     pool = await asyncio.to_thread(db.lottery_current_pool, today)
 
-    pick_note = "机选" if (not tokens or (len(tokens) == 1 and tokens[0].isdigit())) else "自选"
+    pick_note = (
+        "机选" if (not tokens or (len(tokens) == 1 and tokens[0].isdigit())) else "自选"
+    )
     return R(
         tmpl="panel",
         data={
@@ -220,7 +239,10 @@ async def my_tickets(db, gid, uid, cfg):
             "blocks": [
                 {"label": "持有", "value": f"{len(tickets)}/{limit} 注"},
                 {"label": "当前奖池", "value": f"{logic.fmt_money(pool)} 元"},
-                {"label": "奖级", "value": "一等奖 3红+蓝 · 二等奖 3红 · 三等奖 2红+蓝"},
+                {
+                    "label": "奖级",
+                    "value": "一等奖 3红+蓝 · 二等奖 3红 · 三等奖 2红+蓝",
+                },
             ],
         },
         text="🎟️ 本期号码：" + "；".join(t["number"] for t in tickets),
@@ -274,6 +296,7 @@ async def lottery_pool_view(db, cfg):
     tickets = await asyncio.to_thread(db.lottery_today_all_count, today)
     draw_hour = int(logic.cfg_get(cfg, "lottery_draw_hour", 21))
     price = float(logic.cfg_get(cfg, "lottery_ticket_price", 100))
+    tiers = _tiers_from_cfg(cfg)
     return R(
         tmpl="panel",
         data={
@@ -285,8 +308,18 @@ async def lottery_pool_view(db, cfg):
                 {"label": "本期售出", "value": f"{tickets} 注"},
                 {"label": "开奖时间", "value": f"每天 {draw_hour}:00 自动开奖"},
                 {"label": "票价", "value": f"{logic.fmt_money(price)} 元/注"},
-                {"label": "玩法", "value": f"红球 1~{RED_MAX} 选 {RED_PICK} + 蓝球 1~{BLUE_MAX} 选 1"},
-                {"label": "奖级", "value": "一等奖 60% · 二等奖 25% · 三等奖 15%"},
+                {
+                    "label": "玩法",
+                    "value": f"红球 1~{RED_MAX} 选 {RED_PICK} + 蓝球 1~{BLUE_MAX} 选 1",
+                },
+                {
+                    "label": "奖级",
+                    "value": (
+                        f"一等奖 {tiers['jackpot']:.0%} · "
+                        f"二等奖 {tiers['second']:.0%} · "
+                        f"三等奖 {tiers['third']:.0%}"
+                    ),
+                },
             ],
             "foot": "彩票收入全部进入奖池，无人中奖自动滚存，头奖越滚越大",
         },

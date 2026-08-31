@@ -14,7 +14,9 @@ async def job_market(ctx, event):
         return R(err=GID_HINT)
     companies = await career.hiring_pool(ctx.db, gid)
     companies.sort(key=lambda c: c["min_exp"])
-    p = await asyncio.to_thread(ctx.db.get_player, gid, event.get_sender_id())
+    p = await asyncio.to_thread(
+        ctx.db.get_player, gid, event.get_sender_id(), event.get_sender_name()
+    )
     exp = int(p["exp"])
     eligible = [c for c in companies if c["min_exp"] <= exp]
     return R(

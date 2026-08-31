@@ -1,4 +1,91 @@
-﻿## 1.0.0 (2026-08-31)
+## 1.0.1 (2026-08-31)
+
+全量代码审计后的修复版本（四轮审计合并），共修复 49 个问题（3 Critical / 9 High / 22 Medium / 15 Low）+ 18 项硬编码配置化。
+
+### 🐛 Bug 修复
+
+#### 第四轮审计新增
+
+- **`webui/server.py` aiohttp NameError**（Critical）：`_body()` 中 `ContentTypeError` 未通过 `web.` 前缀访问，非 JSON 请求触发 `NameError` → 500。改为 `web.ContentTypeError`。
+- **`db.py` DELTA_FLOAT_COLUMNS 缺失三列**（Critical）：`deposit`/`fund`/`fund_savings` 未纳入增量写回的 delta 钳制范围，并发写入可能产生负值。三列加入 `DELTA_FLOAT_COLUMNS`。
+- **`life.py` shopping 无余额校验**（High）：购物不检查现金是否足够，`max(0.0, cash - budget)` 钳制后零余额玩家可免费购物。增加前置余额校验，不足则拒绝下单。
+- **`stock_cmds.py` sell ratio=0 静默清仓**（High）：`parse_int("0", default=100, lo=1)` 中 0 < lo=1 触发 default=100，用户输入 0% 时实际卖出 100%。改为 `default=None` + 独立 100 兜底。
+- **`webui/server.py` secure cookie 在 LAN HTTP 下导致登录失效**（High）：`secure=self.host not in (...)` 对 LAN IP 设 `secure=True`，浏览器不回传 cookie。改为按 `request.scheme` / `X-Forwarded-Proto` 判断 HTTPS。
+- **`webui/server.py` save_config 未包 try/except**（High）：配置保存失败时未捕获异常，导致 500 且无错误反馈。增加 `try/except` + 500 JSON 响应。
+- **`career.py` checkin `logic.pick` 返回空串导致 `.get()` 崩溃**（Medium）：`checkin_events` 空列表时 `pick()` 返回 `""`，后续 `ev.get()` 崩溃。增加 `isinstance(ev, dict)` 守卫 + 兜底事件。
+- **`career.py` overtime `logic.pick` 返回空串导致 `.get()` 崩溃**（Medium）：同上，`overtime_events` 空列表时崩溃。增加守卫。
+- **`life.py` teambuild `logic.pick` 返回空串导致 `.get()` 崩溃**（Medium）：同上，`teambuild` 空列表时崩溃。增加守卫。
+- **`social.py` rank_events `logic.pick` 返回空串导致 `["effect"]` 崩溃**（Medium）：排位赛事件池空时 `ev["effect"]` 崩溃。增加守卫 + 兜底事件。
+- **`lottery.py` 奖池展示硬编码 60%/25%/15%**（Medium）：奖池面板写死比例，不随 `lottery_jackpot_pct` 等配置变化。改为从 `_tiers_from_cfg(cfg)` 动态读取。
+- **`career.py` 通勤费不足时效果仍生效**（Medium）：余额不够付通勤费时只跳过扣费，但 `health`/`mind` 效果照加。改为余额不足时按步行处理（不扣费也不加效果）。
+- **`stock_cmds.py` 手续费显示用重算值**（Medium）：买入面板手续费用 `fee_rate * r['amount']` 重算而非 `r['fee']`，与实际扣费可能不一致。改为读 `r['fee']`。
+- **`webui/server.py` `_coerce` list 强制 str 破坏数值列表**（Medium）：`shopping_budgets`/`shopping_weights` 等数值列表经 WebUI 保存后被强制转成字符串。改为保留 `int`/`float` 原始类型。
+- **`main.py` `terminate()` 未关闭 DB**（Medium）：卸载时不执行 WAL checkpoint，`-wal` 文件可能残留。新增 `db.close()` 方法 + `terminate()` 调用。
+- **README 配置项数与 API 数过时**（Low）：配置项 215→237，WebUI 路由 26→33。
+- **CHANGELOG 配置项类型标注错误**（Low）：`teambuild_cooldown_days`/`shopping_cooldown_hours` 标注 int 应为 float。
+- **`metadata.yaml` author 与 repo 所有者不一致**（Low）：author `wbndm` 与 repo 所有者 `wbndmqaq` 不一致，统一为 `wbndmqaq`。
+
+#### 前三轮审计修复
+
+- **`stocks.py` 买入手续费双重收取**（Critical）：买入股票时先从现金扣除 `amount + fee`，再把 `shares = (amount - fee) / price`，导致手续费被扣两次（一次少买份额、一次多扣现金）。改为 fee-on-top 模式：现金扣 `amount + fee`，份额按全额本金 `shares = amount / price` 计算。
+- **`career.py` take_leave 硬编码显示值**（High）：请假面板和文本中 `+15`/`+8` 写死，不随 `leave_mind_gain`/`leave_health_gain` 配置变化。改为从配置读取变量，面板与文本统一引用。
+- **`career.py` my_company 工作强度硬编码**（High）：公司详情页 `comp['intensity'] * 0.4` 硬编码，与 `checkin` 使用的 `work_intensity_health_factor` 配置不一致。改为读取同一配置项。
+- **`finance.py` 基金结算重摇利用**（High）：`bank_info`/`fund_buy`/`fund_sell` 三个函数在结算后不立即持久化，若后续输入校验失败则 stale `fund_day` 未更新，玩家可反复发非法指令只保留正收益结算、丢弃负收益。改为结算后立即 `save_player`，再执行后续逻辑。
+- **`gamedata.py` 8 个函数浅拷贝导致缓存污染**（High）：`companies`/`company_by_id`/`positions`/`houses`/`shop_items`/`opponents`/`workstations`/`rank_events` 返回 `list()` 浅拷贝，调用方修改 dict 会回写缓存。改为 `[dict(x) for x in ...]` 深拷贝。
+- **`gamedata.py` match_opponent 空池崩溃**（High）：对手池为空时 `random.choice([])` 触发 `IndexError`。改为返回兜底 dict。
+- **`career.py` take_comp_leave 硬编码显示值**（Medium）：调休面板和逻辑中 `+15`/`+8` 写死，与 `take_leave` 相同问题。改为从配置读取。
+- **`career.py` job_hop/promote 两次 pick 不一致**（Medium）：跳槽/晋升失败时面板 lines 和 text 各调一次 `logic.pick()`，随机结果可能不同。改为单次取值复用。
+- **`career.py` company_dividend 冗余 DB 查询**（Medium）：`load_player` 加载的 `p` 从未使用，后续又重新 `get_player`。删除多余调用。
+- **`logic.py` clamp 不处理 None 输入**（Medium）：`clamp(None)` 崩溃。增加 `if v is None: return lo` 守卫 + `float(v)` 转换。
+- **`logic.py` interest_of `now=0` 被视为 falsy**（Medium）：`now or now_ts()` 在 `now=0` 时错误回退到当前时间。改为 `now_ts() if now is None else now`。
+- **`db.py` last_review_payload 53 周年回退错误**（Medium）：53 周年份时硬编码回退到 week 52 而非 53。改为 `datetime.date(prev_year, 12, 31).isocalendar()` 动态计算。
+- **`social.py` 决斗基础胜率硬编码**（Medium）：`0.5` 硬编码。新增 `duel_base_win_rate` 配置项。
+- **`renderer.py` close() 非幂等**（Medium）：重复调用 `close()` 时第二次仍尝试获取信号量并关闭已关闭的 browser。增加早退守卫。
+- **`context.py` amount_after 子串误删**（Medium）：`str.replace(uid, " ")` 会把 uid 子串从更长数字中误删（如 uid "123" 从 "123456" 中删出 "456"）。改为 `re.sub` 配合数字边界断言 `(?<!\d)...(?!\d)`。
+- **`life2.py` logic.pick 返回空串导致 .get() 崩溃**（Medium）：`meeting`/`pet_interact` 中 `logic.pick()` 在空列表时返回 `""`，后续 `ev.get()` 崩溃。增加 `isinstance(ev, dict)` 守卫。
+- **`life2.py` travel 空目的地列表崩溃**（Medium）：`random.choice(dests)` 在空列表时崩溃。增加前置守卫。
+- **`backup.py` sqlite3.connect 失败时资源泄露**（Medium）：两个 `sqlite3.connect()` 在 try 块外，若第二个失败则第一个连接泄露。改为 None 守卫 + try/finally。
+- **`career.py` 医疗费硬编码参数**（Low）：住院费用上限 3000、下限 200、比例 0.25 均硬编码。新增 `hospital_cost_max`/`hospital_cost_min`/`hospital_cost_rate` 配置项。
+- **`career.py` 裁员安全事件概率硬编码**（Low）：打卡时 `0.05` 硬编码。新增 `layoff_safe_event_rate` 配置项。
+- **`extra.py` 成就列表排序不确定**（Low）：`list(set)` 顺序不确定，同一成就集可能生成不同 JSON。改为 `sorted()` 保证确定性。
+- **`extra.py` year_bonus 出勤上限硬编码**（Low）：`min(streak, 20)` 硬编码 20，不随 `attend_streak_bonus_days` 配置变化。改为从配置读取。
+- **`extra2.py` party_lottery 空奖品列表崩溃**（Low）：奖品池为空时 `random.choice([])` 触发 `IndexError`。增加前置守卫返回友好提示。
+- **`market_cmds.py` get_player 缺少 nickname**（Low）：跳槽市场查询未传 `nickname`，新建玩家昵称为空。补传 `event.get_sender_name()`。
+- **`db.py` claim_redpacket json.loads 无异常守卫**（Low）：恶意或畸形 JSON 触发 `JSONDecodeError` 崩溃。增加 `try/except`。
+- **`db.py` create_redpacket 死代码**（Low）：非原子版本无调用者，删除。
+- **`extra2.py` 死参数 + 缺少 .get() 守卫**（Low）：`career_advice(ctx_db=None)` 死参数删除；年会奖品 `prize['rank']`/`prize['text']` 改为 `.get()`。
+- **`web_auth.py` verify_password 异常覆盖不全**（Low）：仅捕获 `VerifyMismatchError`/`InvalidHashError`，遗漏 `Argon2Error` 基类。补充捕获。
+- **`webui/server.py` _body 缺少 ContentTypeError**（Low）：`aiohttp.ContentTypeError` 未捕获，畸形 Content-Type 请求触发 500。补充捕获。
+- **`gamedata.py` 死别名 opponent_pool**（Low）：`opponent_pool` 为 `opponents` 的旧别名，无调用者，删除。
+- **`extra.py` gossip_texts 空列表崩溃**（Low）：`random.choice(gd.t("extra", "gossip_texts"))` 在数据缺失时崩溃。改用 `logic.pick()` + 兜底文案。
+
+### ⚙️ 新增配置项
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `hospital_cost_max` | float | 3000.0 | 住院医疗费上限 |
+| `hospital_cost_min` | float | 200.0 | 住院医疗费下限 |
+| `hospital_cost_rate` | float | 0.25 | 住院医疗费比例（按现金计算） |
+| `layoff_safe_event_rate` | float | 0.05 | 打卡时裁员安全事件触发概率 |
+| `lottery_jackpot_pct` | float | 0.6 | 一等奖奖金占奖池比例 |
+| `lottery_second_pct` | float | 0.25 | 二等奖奖金占奖池比例 |
+| `lottery_third_pct` | float | 0.15 | 三等奖奖金占奖池比例 |
+| `review_score_rand_min` | float | 0.8 | 周报评分随机波动下限 |
+| `review_score_rand_range` | float | 0.4 | 周报评分随机波动范围 |
+| `report_s_bonus_multi` | float | 2.0 | 周报S级奖金乘数 |
+| `shopping_refund_rate` | float | 0.15 | 购物退货折损比例 |
+| `shopping_shipping_rate` | float | 0.1 | 购物运费比例 |
+| `shopping_deal_rate` | float | 0.30 | 薅羊毛成功率 |
+| `shopping_refund_mind` | int | 5 | 退货精神惩罚 |
+| `coffee_pack_health_bonus` | float | 30.0 | 咖啡道具健康恢复值 |
+| `coffee_pack_mind_bonus` | float | 30.0 | 咖啡道具精神恢复值 |
+| `teambuild_cooldown_days` | float | 7.0 | 团建冷却天数 |
+| `shopping_cooldown_hours` | float | 6.0 | 购物冷却小时数 |
+| `duel_base_win_rate` | float | 0.5 | 对线基础胜率 |
+
+---
+
+## 1.0.0 (2026-08-31)
 
 🏢 **打工人·上班族物语** —— AstrBot 大型群聊职场生存模拟游戏（首个公开版本）。
 
@@ -9,10 +96,6 @@
   挤地铁通勤、交房租、吃外卖、买基金绿到发光、买股票追涨杀跌、团建购物两不误，
   攒够公积金全款买房安家。
 - 玩家之间方案评审式对线撕逼、亲自出战卷王大赛冲击「传奇卷王」段位。
-- 数据落 **SQLite**（标准库，WAL + 线程安全写锁 + 原子资金操作），
-  全部输出用 **Playwright** 截图渲染，失败自动回退纯文本。
-- 配套独立端口 **WebUI 管理面板**（aiohttp + 密码登录 + 桌面/手机自适应），
-  覆盖实时动态、排行榜、玩家搜索、股票、备份恢复、配置、公司与文案编辑。
 
 ### 🎮 指令速查（93 条）
 

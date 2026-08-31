@@ -85,6 +85,28 @@ def _jti_from_request(request) -> str:
     return str(claims.get("jti", "")) if isinstance(claims, dict) else ""
 
 
+def _verified_jti(request, secret: str) -> str:
+    """验签后从当前 cookie 解码 JWT 拿 jti；验签失败返回空串。
+
+    用于公开路径（如登出）——不能像 _jti_from_request 那样跳过签名，
+    否则伪造 cookie 即可针对任意已知 jti 撤销会话。
+    """
+    raw = request.cookies.get(COOKIE, "")
+    if not raw or not secret:
+        return ""
+    try:
+        claims = jwt.decode(
+            raw,
+            secret,
+            algorithms=[JWT_ALG],
+            issuer=JWT_ISSUER,
+            options={"require": ["exp", "iat", "jti"]},
+        )
+    except jwt.PyJWTError:
+        return ""
+    return str(claims.get("jti", "")) if isinstance(claims, dict) else ""
+
+
 class WebUIServer:
     def __init__(
         self,
@@ -109,7 +131,9 @@ class WebUIServer:
         self.port = int(port)
         self.version = version
         self.log = logger
-        self.password_stored = str(password or "")  # Argon2id 哈希；_verify_pwd 统一校验
+        self.password_stored = str(
+            password or ""
+        )  # Argon2id 哈希；_verify_pwd 统一校验
         # QQ 官方机器人的 appid 要到收到第一条消息才知道，所以取回调而非快照
         self._app_id_getter = app_id_getter
         # 实时引用插件配置对象本身（不是快照）：面板读到的永远是当前值
@@ -154,17 +178,12 @@ class WebUIServer:
         jti = str(claims.get("jti", ""))
         if not jti:
             return False
+        # get_webui_session 默认已过滤过期行（expires_at > now），
+        # 过期会话由 cleanup_old_data / purge_expired_webui_sessions 周期清理。
         sess = await asyncio.to_thread(self.db.get_webui_session, jti)
         if not sess:
             return False
         now = int(time.time())
-        if sess["expires_at"] < now:
-            # 过期会话：lazy 清理，避免每请求写库
-            try:
-                await asyncio.to_thread(self.db.revoke_webui_session, jti)
-            except Exception:  # noqa: BLE001
-                pass
-            return False
         if now - sess["last_seen_at"] > 60:
             try:
                 await asyncio.to_thread(self.db.touch_webui_session, jti)
@@ -182,7 +201,11 @@ class WebUIServer:
         """读 WebUI 实例自身的配置偏好：_live_config 是实时引用，operator 在 AstrBot
         / WebUI 里改了立刻可见，无需重启插件。"""
         try:
-            v = self._live_config.get(key) if hasattr(self._live_config, "get") else None
+            v = (
+                self._live_config.get(key)
+                if hasattr(self._live_config, "get")
+                else None
+            )
         except Exception:  # noqa: BLE001 - 配置对象异常不应让面板打不开
             return default
         return default if v is None else v
@@ -286,9 +309,20 @@ class WebUIServer:
     def _note_fail(self, ip: str):
         now = time.time()
         if len(self._fails) > LOGIN_TRACK_MAX:
+            # 先清已过期条目；仍超上限时再按「最近失败时间」最久优先淘汰，
+            # 避免分布式爆破在窗口期内把字典撑得无限大。被临时封禁的条目跳过，
+            # 保留其封禁效果。
             for k, v in list(self._fails.items()):
                 if v[2] < now and now - v[1] > LOGIN_WINDOW:
                     self._fails.pop(k, None)
+            if len(self._fails) > LOGIN_TRACK_MAX:
+                for k in sorted(
+                    self._fails.keys(), key=lambda k: self._fails[k][1]
+                ):
+                    if len(self._fails) <= LOGIN_TRACK_MAX:
+                        break
+                    if self._fails[k][2] < now:
+                        self._fails.pop(k, None)
         rec = self._fails.setdefault(ip, [0, now, 0.0])
         if now - rec[1] > LOGIN_WINDOW:
             rec[0], rec[1] = 0, now
@@ -345,9 +379,7 @@ class WebUIServer:
         # - 每轮必须新建 TCPSite——失败的 site 已注册进 runner，复用会报重复注册。
         last_exc: Exception | None = None
         for _attempt in range(3):
-            site = web.TCPSite(
-                self._runner, self.host, self.port, reuse_address=True
-            )
+            site = web.TCPSite(self._runner, self.host, self.port, reuse_address=True)
             try:
                 await site.start()
                 return
@@ -415,7 +447,7 @@ class WebUIServer:
             return {}
         try:
             data = await request.json()
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, web.ContentTypeError):
             return {}
         return data if isinstance(data, dict) else {}
 
@@ -442,9 +474,7 @@ class WebUIServer:
         jti = uuid.uuid4().hex
         ua = request.headers.get("User-Agent", "")[:256]
         try:
-            await asyncio.to_thread(
-                self.db.create_webui_session, jti, ip, ua, TTL
-            )
+            await asyncio.to_thread(self.db.create_webui_session, jti, ip, ua, TTL)
         except Exception as e:  # noqa: BLE001 - DB 失败不能让密码错误遮盖真实原因
             self.log.error(f"[上班族物语] 创建会话失败：{e}")
             return _json({"error": "服务器内部错误"}, 500)
@@ -460,6 +490,10 @@ class WebUIServer:
             algorithm=JWT_ALG,
         )
         resp = _json({"ok": True, "must_change_password": must_change, "jti": jti})
+        # 仅在 HTTPS（含反代 X-Forwarded-Proto）下设置 secure，
+        # 否则 LAN HTTP 访问时浏览器不会回传 cookie 导致登录失效
+        fwd_proto = request.headers.get("X-Forwarded-Proto", "").lower()
+        is_https = request.scheme == "https" or fwd_proto == "https"
         resp.set_cookie(
             COOKIE,
             token,
@@ -467,12 +501,15 @@ class WebUIServer:
             httponly=True,
             samesite="Lax",
             path="/",
-            secure=self.host not in ("127.0.0.1", "localhost", "::1"),
+            secure=is_https,
         )
         return resp
 
     async def _logout(self, request):
-        jti = _jti_from_request(request)
+        # 登出是公开路径（未登录也能清 cookie），因此不能信未经校验的 cookie。
+        # 必须先验签名再撤销会话，否则任何人伪造一个带 jti 的 cookie 就能
+        # 在知道对方 jti 的情况下强行注销其会话。
+        jti = _verified_jti(request, self._jwt_secret)
         if jti:
             try:
                 await asyncio.to_thread(self.db.revoke_webui_session, jti)
@@ -557,7 +594,9 @@ class WebUIServer:
         except Exception as e:  # noqa: BLE001
             self.log.warning(f"[上班族物语] 撤销会话失败：{e}")
             return _json({"error": "服务器内部错误"}, 500)
-        resp = _json({"ok": True, "revoked": n, "current_revoked": target == current_jti})
+        resp = _json(
+            {"ok": True, "revoked": n, "current_revoked": target == current_jti}
+        )
         if target == current_jti:
             resp.del_cookie(COOKIE, path="/")
         return resp
@@ -600,10 +639,7 @@ class WebUIServer:
     async def _groups(self, request):
         names = await asyncio.to_thread(self.db.all_group_names)
         gids = await asyncio.to_thread(self.db.group_ids)
-        groups = [
-            {"gid": g, "count": n, "name": names.get(g, "")}
-            for g, n in gids
-        ]
+        groups = [{"gid": g, "count": n, "name": names.get(g, "")} for g, n in gids]
         return _json({"groups": groups})
 
     async def _ranking(self, request):
@@ -656,10 +692,16 @@ class WebUIServer:
     async def _search(self, request):
         gid = request.query.get("gid", "")
         kw = request.query.get("kw", "")
-        p = await asyncio.to_thread(self.db.find_player_any, gid, kw) if gid and kw else None
+        p = (
+            await asyncio.to_thread(self.db.find_player_any, gid, kw)
+            if gid and kw
+            else None
+        )
         if not p:
             return _json({"results": []})
-        return _json({"results": [self.build_profile(p, await self._company_names(gid))]})
+        return _json(
+            {"results": [self.build_profile(p, await self._company_names(gid))]}
+        )
 
     # ===== 股票 =====
 
@@ -736,7 +778,11 @@ class WebUIServer:
     async def _admin_get(self, request):
         gid = request.query.get("gid", "")
         uid = request.query.get("uid", "")
-        p = await asyncio.to_thread(self.db.find_player_any, gid, uid) if gid and uid else None
+        p = (
+            await asyncio.to_thread(self.db.find_player_any, gid, uid)
+            if gid and uid
+            else None
+        )
         if not p:
             return _json({"error": "未找到"}, 404)
         return _json({"profile": self.build_profile(p, await self._company_names(gid))})
@@ -858,7 +904,16 @@ class WebUIServer:
                     x.strip()
                     for x in raw.replace("，", "\n").replace(",", "\n").split("\n")
                 ]
-            return [str(x).strip()[:100] for x in raw if str(x).strip()][:200]
+            # 保留元素原始类型（int/float），仅对字符串做清洗和截断
+            result = []
+            for x in raw:
+                if isinstance(x, (int, float)) and not isinstance(x, bool):
+                    result.append(x)
+                else:
+                    s = str(x).strip()
+                    if s:
+                        result.append(s[:100])
+            return result[:200]
         return str(raw).strip()[:500]
 
     async def _admin_config_save(self, request):
@@ -909,8 +964,22 @@ class WebUIServer:
         save = getattr(target, "save_config", None)
         persisted = False
         if callable(save):
-            await asyncio.to_thread(save)  # 落盘是同步文件写，别堵事件循环
-            persisted = True
+            try:
+                await asyncio.to_thread(save)  # 落盘是同步文件写，别堵事件循环
+                persisted = True
+            except Exception as e:  # noqa: BLE001
+                self.log.error(f"[上班族物语] 配置保存失败：{e}")
+                return _json({"error": f"配置保存失败：{e}"}, 500)
+        # JWT 签名密钥即时生效：面板改了 webui_jwt_secret 后，必须同步到
+        # 内存里的 _jwt_secret，否则旧的 HS256 密钥继续签发/校验，旋转等于没生效；
+        # 且旧 cookie 全部作废，强制用新密钥重新登录。
+        new_secret = str(target.get("webui_jwt_secret") or "")
+        if new_secret and new_secret != self._jwt_secret:
+            try:
+                await asyncio.to_thread(self.db.revoke_all_webui_sessions)
+            except Exception as e:  # noqa: BLE001
+                self.log.warning(f"[上班族物语] JWT 轮换撤销会话失败：{e}")
+            self._jwt_secret = new_secret
         # 密码修改即时生效（无需重载插件）；同时让旧 cookie 全部失效
         if pwd_changed:
             new_pwd = str(target.get("webui_password") or "")
@@ -963,7 +1032,9 @@ class WebUIServer:
                     "risk": num(raw, "risk", 0.01, 0, 1),
                     "min_exp": int(num(raw, "min_exp", 0, 0, 999_999)),
                     "desc": str(raw.get("desc") or "").strip()[:120],
-                    "perks": [str(x).strip()[:30] for x in (raw.get("perks") or [])][:6],
+                    "perks": [str(x).strip()[:30] for x in (raw.get("perks") or [])][
+                        :6
+                    ],
                 }
             )
         if not cleaned:
@@ -1033,7 +1104,9 @@ class WebUIServer:
         await asyncio.to_thread(target_path.write_text, content, encoding="utf-8")
         await asyncio.to_thread(gd.load_all, force=True)
         # 文案改了 → Jinja2 编译过的模板也要清，否则下次截图仍是旧模板
-        if self._renderer is not None and hasattr(self._renderer, "clear_template_cache"):
+        if self._renderer is not None and hasattr(
+            self._renderer, "clear_template_cache"
+        ):
             self._renderer.clear_template_cache()
         return _json({"ok": True, "keys": len(data)})
 
@@ -1041,16 +1114,18 @@ class WebUIServer:
         gid = request.query.get("gid", "")
         page = logic.parse_int(request.query.get("page", "1"), default=1, lo=1) or 1
         size = 20
-        players = await asyncio.to_thread(self.db.all_players, gid) if gid else []
-        total = len(players)
-        start = (page - 1) * size
-        page_data = players[start : start + size]
+        if gid:
+            total, players = await asyncio.to_thread(
+                self.db.page_players, gid, page, size
+            )
+        else:
+            total, players = 0, []
         names = await self._company_names(gid)
         return _json(
             {
                 "total": total,
                 "page": page,
-                "players": [self.build_profile(p, names) for p in page_data],
+                "players": [self.build_profile(p, names) for p in players],
             }
         )
 

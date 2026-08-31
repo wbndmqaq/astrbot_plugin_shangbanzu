@@ -131,7 +131,7 @@ async def buy_stock(ctx, event):
                     "value": f"{_fmt(st['price'])} 元（今日 {st['chg']:+}%）",
                 },
                 {"label": "买入金额", "value": f"{_fmt(r['amount'])} 元"},
-                {"label": "手续费", "value": f"-{_fmt(fee_rate * r['amount'])} 元"},
+                {"label": "手续费", "value": f"-{_fmt(r['fee'])} 元"},
                 {"label": "获得份额", "value": f"{r['shares']} 份"},
                 {"label": "剩余现金", "value": f"{_fmt(p['cash'])} 元"},
             ],
@@ -155,9 +155,12 @@ async def sell_stock(ctx, event):
         )
     me = str(event.get_sender_id())
     key = m.group(1)
-    ratio = logic.parse_int(m.group(2), default=100, lo=1, hi=100) if m.group(2) else 100
-    if ratio is None:
-        return R(err="卖出比例需在 1~100 之间")
+    if m.group(2):
+        ratio = logic.parse_int(m.group(2), default=None, lo=1, hi=100)
+        if ratio is None:
+            return R(err="卖出比例需在 1~100 之间")
+    else:
+        ratio = 100
 
     fee_rate = float(ctx.c("stock_fee_rate", 0.005))
     pos = await ctx.star.market.position_of(gid, me, key)
@@ -246,6 +249,63 @@ async def my_portfolio(ctx, event):
     )
 
 
+async def liquidate_all(ctx, event):
+    """一键清仓：把当前全部持仓按 100% 卖出。"""
+    gid = gid_of(event)
+    if not gid:
+        return R(err=GID_HINT)
+    me = str(event.get_sender_id())
+    fee_rate = float(ctx.c("stock_fee_rate", 0.005))
+    positions = await ctx.star.market.my_positions(gid, me)
+    if not positions:
+        return R(err="你还没有任何持仓，「买股票 <代码> <金额>」开始投资之旅")
+
+    total_income = 0.0
+    total_profit = 0.0
+    sold = 0
+    lines = []
+    for pos in positions:
+        r = await ctx.star.market.sell(gid, me, pos["code"], 1.0, fee_rate)
+        if r is None:
+            continue
+        total_income = round(total_income + float(r["income"]), 2)
+        total_profit = round(total_profit + float(r["profit"]), 2)
+        sold += 1
+        lines.append(f"  {pos['name']}：到账 {_fmt(r['income'])} 元（盈亏 {r['profit']:+}）")
+        await asyncio.to_thread(
+            ctx.db.add_transaction,
+            gid,
+            me,
+            "卖出股票",
+            r["income"],
+            f"{r['name']} 清仓盈亏{r['profit']:+}",
+        )
+    if sold == 0:
+        return R(err="清仓失败：持仓份额异常，请稍后再试")
+
+    p = await asyncio.to_thread(ctx.db.get_player, gid, me)
+    return R(
+        tmpl="panel",
+        data={
+            "icon": "🧹",
+            "title": "一键清仓完成",
+            "accent": "#ffd86f" if total_profit >= 0 else "#fc6262",
+            "lines": lines[:12],
+            "blocks": [
+                {"label": "卖出持仓", "value": f"{sold} 支"},
+                {"label": "合计到账", "value": f"+{_fmt(total_income)} 元（含手续费）"},
+                {
+                    "label": "合计盈亏",
+                    "value": ("+" if total_profit >= 0 else "") + _fmt(total_profit) + " 元",
+                },
+                {"label": "剩余现金", "value": f"{_fmt(p['cash'])} 元"},
+            ],
+            "foot": "轻仓一身轻，落袋为安",
+        },
+        text=f"一键清仓完成：卖出 {sold} 支，合计到账 {_fmt(total_income)} 元（盈亏 {total_profit:+}）",
+    )
+
+
 ROUTES = [
     Route(
         r"^[#]?(股市|大盘|行情|股市行情)$",
@@ -265,6 +325,13 @@ ROUTES = [
         "按金额买入指定股票（买股票/买入均可）",
         buy_stock,
         priority=1,
+    ),
+    Route(
+        r"^[#]?清仓$",
+        "cmd_liquidate_all",
+        "一键清仓，卖出全部持仓",
+        liquidate_all,
+        priority=2,
     ),
     Route(
         r"^[#]?(卖出|卖股票|清仓)(?:\s+\S+)?(?:\s+\d+%?)?$",

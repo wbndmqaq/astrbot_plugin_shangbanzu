@@ -13,9 +13,7 @@ async def market_list(db, gid, app_id: str = "", cfg=None):
     if not players:
         return R(err="本群还没有人入职任何公司，快发送「找工作」当第一个上班族")
     players.sort(key=lambda x: (int(x["lvl"]), float(x["salary"])), reverse=True)
-    names = gd.company_names(
-        await asyncio.to_thread(db.custom_companies_of_group, gid)
-    )
+    names = gd.company_names(await asyncio.to_thread(db.custom_companies_of_group, gid))
     rows = []
     cap = int(logic.cfg_get(cfg, "market_list_max", 60))
     for i, pl in enumerate(players[:cap], 1):
@@ -73,9 +71,9 @@ async def duel(db, gid, me, target, cfg, target_name="", app_id: str = ""):
     diff = v1 - v2
     weight = float(logic.cfg_get(cfg, "duel_value_weight", 0.5))
     max_adv = float(logic.cfg_get(cfg, "duel_max_advantage", 0.3))
-    win_rate = 0.5 + min(max_adv, abs(diff) / max(v1, v2, 1) * weight) * (
-        1 if diff > 0 else -1
-    )
+    win_rate = float(logic.cfg_get(cfg, "duel_base_win_rate", 0.5)) + min(
+        max_adv, abs(diff) / max(v1, v2, 1) * weight
+    ) * (1 if diff > 0 else -1)
     win = random.random() < win_rate
 
     actions_pool = [t.format(a=my_name, b=t_name) for t in gd.t("duel", "actions")]
@@ -93,7 +91,9 @@ async def duel(db, gid, me, target, cfg, target_name="", app_id: str = ""):
                 "icon": "🛡️",
                 "title": "对线失利 · 护盾生效！",
                 "accent": "#ffd86f",
-                "lines": [f"你在与 {t_name} 的PPT对线中落于下风，但你装配的【防甩锅护盾】为你吸收了全部惩罚！"],
+                "lines": [
+                    f"你在与 {t_name} 的PPT对线中落于下风，但你装配的【防甩锅护盾】为你吸收了全部惩罚！"
+                ],
                 "blocks": [
                     {"label": "护盾状态", "value": "已消耗 1 层"},
                     {"label": "场地费/身价", "value": "100% 豁免"},
@@ -111,7 +111,11 @@ async def duel(db, gid, me, target, cfg, target_name="", app_id: str = ""):
     reward = round(fee * (1 + reward_rate), 2) if win else 0.0
     net = round(reward - fee, 2)
     p["cash"] = round(float(p["cash"]) + net, 2)
-    v_up = int(float(p["value"]) * bonus_rate) if win else int(float(td["value"]) * bonus_rate)
+    v_up = (
+        int(float(p["value"]) * bonus_rate)
+        if win
+        else int(float(td["value"]) * bonus_rate)
+    )
     # 败方身价惩罚率必须与胜方加成一起可调：只调加成会让每场对线净增身价
     penalty_rate = float(logic.cfg_get(cfg, "duel_value_penalty_rate", 0.05))
     v_down = (
@@ -157,7 +161,9 @@ async def duel(db, gid, me, target, cfg, target_name="", app_id: str = ""):
                 {"label": "场地费", "value": f"-{fmt(fee)} 元"},
                 {
                     "label": "奖金",
-                    "value": f"+{fmt(reward)} 元（含退还报名费）" if win else "颗粒无收",
+                    "value": f"+{fmt(reward)} 元（含退还报名费）"
+                    if win
+                    else "颗粒无收",
                 },
                 {
                     "label": "净收益",
@@ -182,7 +188,10 @@ async def duel(db, gid, me, target, cfg, target_name="", app_id: str = ""):
 
 
 async def rank_show(db, gid, me):
-    p = await asyncio.to_thread(db.get_player, gid, me)
+    # 纯查看命令，不能 get_player 给陌生 ID 顺手建号
+    p = await asyncio.to_thread(db.find_player_any, gid, str(me))
+    if not p:
+        return R(err="你还没有参赛记录，先发一次「上班」建档吧")
     lines = [
         f"你的段位：{p['rank_tier']}｜积分：{p['rank_score']}｜场次：{p['rank_matches']}",
         "对手池里全是真实同事原型，赢的是积分与奖金，输的只是面子",
@@ -212,6 +221,8 @@ async def rank_join(db, gid, me, cfg, nickname=""):
         )
 
     ev = logic.pick(gd.rank_events())
+    if not isinstance(ev, dict):
+        ev = {"effect": 1.0, "text": "比赛正常进行"}
     opponent = gd.match_opponent(int(p["rank_score"]))
     base = float(logic.cfg_get(cfg, "rank_base_win_rate", 0.5))
     win = random.random() < base * float(ev["effect"])
@@ -225,7 +236,11 @@ async def rank_join(db, gid, me, cfg, nickname=""):
     p["rank_matches"] = int(p["rank_matches"]) + 1
     p["rank_tier"] = logic.tier_of(p["rank_score"])
     # 只对胜利发奖金：此前输了也按积分差发钱，等于人人都有稳定出场费
-    reward = int(abs(diff) * float(logic.cfg_get(cfg, "rank_reward_rate", 0.1))) if win else 0
+    reward = (
+        int(abs(diff) * float(logic.cfg_get(cfg, "rank_reward_rate", 0.1)))
+        if win
+        else 0
+    )
     p["cash"] = round(float(p["cash"]) + reward, 2)
     logic.cd_set(p, "rank", cooldown)
     await asyncio.to_thread(db.save_player, p)

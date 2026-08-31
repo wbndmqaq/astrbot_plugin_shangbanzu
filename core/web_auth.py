@@ -12,7 +12,7 @@
 import secrets
 
 from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHashError, VerifyMismatchError
+from argon2.exceptions import Argon2Error, InvalidHashError, VerifyMismatchError
 
 # OWASP Password Storage Cheat Sheet (2024) 推荐：
 #   m=19 MiB, t=2, p=1  或  m=12 MiB, t=3, p=1
@@ -40,7 +40,7 @@ def verify_password(plain: str, stored: str) -> bool:
         return False
     try:
         return _PH.verify(stored, plain)
-    except (VerifyMismatchError, InvalidHashError):
+    except (VerifyMismatchError, InvalidHashError, Argon2Error):
         return False
 
 

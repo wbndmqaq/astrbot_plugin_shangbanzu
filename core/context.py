@@ -33,7 +33,8 @@ class GameCtx:
         )
         self.group_ttl = max(
             10.0,
-            float(self.c("group_name_cache_ttl_minutes", DEFAULT_GROUP_TTL_MINUTES)) * 60,
+            float(self.c("group_name_cache_ttl_minutes", DEFAULT_GROUP_TTL_MINUTES))
+            * 60,
         )
 
     def avatar(self, uid) -> str:
@@ -125,6 +126,9 @@ class GameCtx:
         适配器（尤其 OneBot/CQ）常把 @ 组件渲染成带对方 QQ 数字的文本，
         若直接 nums() 会把对方 QQ 当成金额（例：转账 @123456 500 会转 123456）。
         这里把被 @ 的目标/自己等 uid 先剔掉再扫数字，只对这类场景生效。
+
+        使用数字边界断言（(?<!\\d)...(?!\\d)）而非朴素 str.replace，
+        避免 uid "123" 把 "123456" 里的子串误删变成 "456"。
         """
         s = event.message_str or ""
         for w in sorted(words, key=len, reverse=True):
@@ -132,7 +136,7 @@ class GameCtx:
         for u in exclude_uids:
             u = str(u)
             if u:
-                s = s.replace(u, " ")
+                s = re.sub(r"(?<!\d)" + re.escape(u) + r"(?!\d)", " ", s)
         nums = re.findall(r"\d+", s)
         return nums[0] if nums else ""
 
@@ -200,9 +204,13 @@ class GameCtx:
             or getattr(bot, "client_id", None)
         )
         if not appid and hasattr(bot, "_http"):
-            appid = getattr(bot._http, "appid", None) or getattr(bot._http, "bot_appid", None)
+            appid = getattr(bot._http, "appid", None) or getattr(
+                bot._http, "bot_appid", None
+            )
         if not appid and hasattr(bot, "api") and hasattr(bot.api, "_http"):
-            appid = getattr(bot.api._http, "appid", None) or getattr(bot.api._http, "bot_appid", None)
+            appid = getattr(bot.api._http, "appid", None) or getattr(
+                bot.api._http, "bot_appid", None
+            )
         if appid:
             self.app_id = str(appid)
 
@@ -277,7 +285,9 @@ class GameCtx:
                 self._card_cache.get(gkey) and self._card_cache[gkey][0] > now
             ):
                 try:
-                    ginfo = await bot.api.call_action("get_group_info", group_id=int(gid), no_cache=False)
+                    ginfo = await bot.api.call_action(
+                        "get_group_info", group_id=int(gid), no_cache=False
+                    )
                     gname = (ginfo.get("group_name") or "").strip()
                     if gname:
                         self._cache_set(gkey, now + self.group_ttl, gname, now)
@@ -307,16 +317,15 @@ class GameCtx:
         if not (hit and hit[0] > now):
             try:
                 route = Route(
-                    "GET", "/v2/groups/{group_openid}/info",
+                    "GET",
+                    "/v2/groups/{group_openid}/info",
                     group_openid=str(gid),
                 )
                 info = await http.request(route)
                 name = str((info or {}).get("group_name") or "").strip()
                 if name:
                     self._cache_set(gkey, now + self.group_ttl, name, now)
-                    await asyncio.to_thread(
-                        self.db.set_group_name, gid, name
-                    )
+                    await asyncio.to_thread(self.db.set_group_name, gid, name)
                 else:
                     self._cache_set(gkey, now + self.group_ttl / 2, "", now)
             except Exception:  # noqa: BLE001
@@ -355,13 +364,17 @@ class GameCtx:
                 route = Route(
                     "GET",
                     "/v2/groups/{group_openid}/members/{member_openid}",
-                    group_openid=str(gid), member_openid=uid,
+                    group_openid=str(gid),
+                    member_openid=uid,
                 )
                 info = await http.request(route)
                 if isinstance(info, dict) and info:
                     card = self._pick_nick(
-                        {k: v for k, v in info.items()
-                         if k not in ("member_openid", "join_timestamp")},
+                        {
+                            k: v
+                            for k, v in info.items()
+                            if k not in ("member_openid", "join_timestamp")
+                        },
                         uid,
                     )
             except Exception as e:  # noqa: BLE001
@@ -375,4 +388,3 @@ class GameCtx:
             await asyncio.to_thread(self.db.set_card, gid, uid, card)
         else:
             self._cache_set(key, now + self.card_ttl / 2, "", now)
-

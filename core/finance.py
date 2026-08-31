@@ -120,7 +120,9 @@ async def upgrade_credit(db, gid, uid, max_mode, cfg, nickname=""):
     p = await logic.load_player(db, gid, uid, nickname, cfg)
     multi = float(logic.cfg_get(cfg, "bank_upgrade_price_multi", 1.2))
     limit_multi = float(logic.cfg_get(cfg, "bank_limit_increase_multi", 1.25))
-    max_times = int(logic.cfg_get(cfg, "credit_upgrade_max_batch", 99)) if max_mode else 1
+    max_times = (
+        int(logic.cfg_get(cfg, "credit_upgrade_max_batch", 99)) if max_mode else 1
+    )
     spent = 0.0
     upgrades = 0
     while upgrades < max_times and float(p["cash"]) >= float(p["bank_upgrade_price"]):
@@ -171,10 +173,13 @@ async def bank_info(db, gid, uid, cfg, nickname=""):
         interest = 0.0
     fund_note = ""
     settle = _settle_fund(p, cfg)
-    if settle and float(p["fund"]) > 0:
-        emoji = "📈" if settle["change"] >= 0 else "📉"
-        fund_note = f"今日基金{emoji} {settle['change']:+.2f}%"
+    if settle:
+        # 无论 fund 是否归零，都必须持久化结算结果，否则 stale fund_day
+        # 导致下次访问重新随机结算，玩家可通过反复查询刷正收益
         await asyncio.to_thread(db.save_player, p)
+        if float(p["fund"]) > 0:
+            emoji = "📈" if settle["change"] >= 0 else "📉"
+            fund_note = f"今日基金{emoji} {settle['change']:+.2f}%"
     return R(
         tmpl="panel",
         data={
@@ -285,10 +290,20 @@ async def transfer(db, gid, me, target, amount, cfg, target_name=""):
     td = await asyncio.to_thread(db.get_player, gid, target)
     tname = td.get("card") or td["nickname"] or target_name or f"用户{target}"
     await asyncio.to_thread(
-        db.add_transaction, gid, me, "转账(出)", -(amt + fee), f"转给 {tname}（含手续费 {fee}）"
+        db.add_transaction,
+        gid,
+        me,
+        "转账(出)",
+        -(amt + fee),
+        f"转给 {tname}（含手续费 {fee}）",
     )
     await asyncio.to_thread(
-        db.add_transaction, gid, target, "转账(入)", amt, f"来自 {p.get('card') or p.get('nickname') or me}"
+        db.add_transaction,
+        gid,
+        target,
+        "转账(入)",
+        amt,
+        f"来自 {p.get('card') or p.get('nickname') or me}",
     )
     return R(
         tmpl="panel",
@@ -310,6 +325,10 @@ async def transfer(db, gid, me, target, amount, cfg, target_name=""):
 async def fund_buy(db, gid, uid, amount, cfg, nickname=""):
     p = await logic.load_player(db, gid, uid, nickname, cfg)
     settle = _settle_fund(p, cfg)
+    if settle:
+        # 结算必须先于输入校验持久化，否则玩家可反复发非法金额指令
+        # 来丢弃负收益结算、保留正收益结算
+        await asyncio.to_thread(db.save_player, p)
     amt = logic.parse_int(amount, lo=1)
     if amt is None:
         return R(err="请输入正确的买入金额，例如「买基金 1000」")
@@ -350,6 +369,9 @@ async def fund_sell(db, gid, uid, ratio_str, cfg, nickname=""):
     if float(p["fund"]) <= 0:
         return R(err="你还没有持仓，拿什么卖？「买基金」先上车")
     settle = _settle_fund(p, cfg)
+    if settle:
+        # 结算必须先于比例校验持久化，防止 stale fund_day 被利用
+        await asyncio.to_thread(db.save_player, p)
     rs = (ratio_str or "").strip()
     hold = float(p["fund"])
     if not rs or rs in ("全部", "all", "ALL"):
@@ -360,7 +382,9 @@ async def fund_sell(db, gid, uid, ratio_str, cfg, nickname=""):
         ratio = min(1.0, max(0.01, float(rs) / 100.0))
     else:
         # 认不出来就报错。以前这里默认 1.0，导致「卖出基金 abc」直接清仓
-        return R(err="赎回比例格式不对，可用：「卖出基金」「卖出基金 全部」「卖出基金 50」「卖出基金 50%」")
+        return R(
+            err="赎回比例格式不对，可用：「卖出基金」「卖出基金 全部」「卖出基金 50」「卖出基金 50%」"
+        )
     sell_amount = round(hold * ratio, 2)
     fee = round(sell_amount * float(logic.cfg_get(cfg, "fund_fee_rate", 0.005)), 2)
     income = round(max(0.0, sell_amount - fee), 2)

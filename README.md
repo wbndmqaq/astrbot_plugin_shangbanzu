@@ -94,7 +94,7 @@ WebUI → 插件管理 → 本插件 → 重载。
 astrbot_plugin_shangbanzu/
 ├── main.py                  # 主入口：生命周期 + 输出渲染 + 路由安装
 ├── metadata.yaml            # 插件元数据（版本规范 PEP 440）
-├── _conf_schema.json        # 215 项配置 Schema（含 min/max，WebUI 在线调参即时生效）
+├── _conf_schema.json        # 237 项配置 Schema（含 min/max，WebUI 在线调参即时生效）
 ├── handlers/                # 【指令路由层】声明式路由表（共 93 条指令，其中 4 条管理员）
 │   ├── base.py              #   Route + install() 动态安装器 + 每用户指令锁
 │   ├── system_cmds.py       #   帮助 / 早报 / 今日事件 / 四大排行
@@ -128,7 +128,7 @@ astrbot_plugin_shangbanzu/
 │   ├── finance.py           #   金融理财服务
 │   └── extra.py / extra2.py #   红包/成就/年会/体检/工位等扩展
 ├── webui/                #   独立端口管理面板（默认 127.0.0.1:17817）
-│   ├── server.py            #   aiohttp + 鉴权中间件 + CSP/Origin 校验 + 登录限流 + 26 个管理 API
+│   ├── server.py            #   aiohttp + 鉴权中间件 + CSP/Origin 校验 + 登录限流 + 33 个路由
 │   ├── index.html           #   响应式管理面板页面
 │   ├── style.css            #   深浅色主题样式（含移动端适配层）
 │   └── app.js               #   前端交互与数据流控制
@@ -188,7 +188,7 @@ QQ 群（插件讨论）：[点击加入](https://qm.qq.com/q/8sOZdZTnaw)
 
 ---
 
-## ⚙️ 核心配置项说明（`_conf_schema.json`，共 215 项，全部带 min/max）
+## ⚙️ 核心配置项说明（`_conf_schema.json`，共 237 项，全部带 min/max）
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -229,7 +229,7 @@ QQ 群（插件讨论）：[点击加入](https://qm.qq.com/q/8sOZdZTnaw)
 - ⚙️ **玩家管理**：档案数值在线编辑与玩家删除（高危操作带确认弹窗）；
 - 📈 **股市管理中心**：100 支股票行情展示、在线快速调价、全局波动触发与重置；
 - 🗂️ **公司与文案编辑器**：116 家公司参数全字段表格编辑、9 大文本库在线配置热重载；
-- 🧩 **在线参数配置**：215 项游戏规则与数值在线修改（数值带 min/max 钳制，列表项可热更新 JSON），即存即生效。配置项在面板里显示为中文标签；
+- 🧩 **在线参数配置**：237 项游戏规则与数值在线修改（数值带 min/max 钳制，列表项可热更新 JSON），即存即生效。配置项在面板里显示为中文标签；
 - 🛡️ **Argon2id 密码存储 + JWT 服务端会话**：密码用 Argon2id（m=64MiB, t=3, p=4，OWASP 推荐）哈希存盘，配置表单以明文文本框展示但存盘恒为哈希；登录令牌走 JWT(HS256)，服务端维护 webui_sessions 会话表（jti 绑定，12h TTL），可在「我的会话」面板单独撤销任意设备；改密立即下线全部会话。
 - 🗄️ **数据备份与回滚**：一键在线创建数据库安全快照，随时安全恢复。
 

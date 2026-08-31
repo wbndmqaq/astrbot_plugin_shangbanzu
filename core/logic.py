@@ -12,7 +12,9 @@ def cfg_get(cfg, key, default=None):
 
 
 def clamp(v, lo, hi):
-    return max(lo, min(hi, v))
+    if v is None:
+        return lo
+    return max(lo, min(hi, float(v)))
 
 
 def now_ts() -> int:
@@ -106,7 +108,7 @@ def interest_of(
     max_hours: int,
     now: int | None = None,
 ) -> float:
-    now = now or now_ts()
+    now = now_ts() if now is None else now
     if deposit <= 0 or not last_interest:
         return 0.0
     hours = int((now - last_interest) // 3600)
@@ -170,6 +172,7 @@ def weighted_layoff(risk: float, scale: float) -> bool:
 # ==================================================================
 # 玩家状态与冷却辅助工具（统一在此管理，避免跨模块私有调用与重复定义）
 # ==================================================================
+
 
 async def load_player(db, gid, uid, nickname, cfg):
     start_cash = float(cfg_get(cfg, "start_cash", 800))

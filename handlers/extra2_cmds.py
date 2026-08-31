@@ -21,8 +21,9 @@ async def lend(ctx, event):
     me = str(event.get_sender_id())
     ats = ctx.ats(event)
     if ats:
-        # 有 @ 时先剔除收款人 QQ，避免适配器把 @ 渲染成数字文本后把 QQ 号当金额
-        target, amount = ats[0], ctx.amount_after(event, ("借钱", "借"), (ats[0],))
+        # 有 @ 时先剔除所有收款人 QQ，避免适配器把 @ 渲染成数字文本后把 QQ 号当金额
+        # （多 @ 场景下第二个 @ 的 QQ 也会被当数字扫进 nums，必须一并剔除）
+        target, amount = ats[0], ctx.amount_after(event, ("借钱", "借"), ats)
     else:
         nums = ctx.nums(event, ("借钱", "借"))
         if len(nums) >= 2:

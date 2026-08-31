@@ -262,6 +262,9 @@ DELTA_FLOAT_COLUMNS = {
     "total_earned": (2, 0.0, None),
     "mind": (1, 0.0, 100.0),
     "value": (2, 0.0, None),
+    "deposit": (2, 0.0, None),
+    "fund": (2, 0.0, None),
+    "fund_savings": (2, 0.0, None),
 }
 DELTA_INT_COLUMNS = ("duel_wins", "duel_losses")
 
@@ -518,7 +521,9 @@ class DB:
             f"INSERT INTO players ({','.join(cols)}) VALUES ({placeholders}) "
             f"ON CONFLICT(gid,uid) DO UPDATE SET {updates}"
         )
-        args = values + [v for c, v in zip(cols, values, strict=True) if c not in ("gid", "uid")]
+        args = values + [
+            v for c, v in zip(cols, values, strict=True) if c not in ("gid", "uid")
+        ]
         with _write_lock:
             conn = self._conn()
             try:
@@ -584,6 +589,28 @@ class DB:
         finally:
             conn.close()
         return [self.normalize(dict(r)) for r in rows]
+
+    def page_players(self, gid, page: int = 1, size: int = 20) -> tuple[int, list[dict]]:
+        """分页取玩家（WebUI 管理列表用）。
+
+        避免 all_players 一次性把整组玩家读进内存再切片：
+        直接带 LIMIT/OFFSET 只取当前页，另用 COUNT 拿总数做分页。
+        """
+        page = max(1, int(page))
+        size = max(1, min(200, int(size)))
+        offset = (page - 1) * size
+        conn = self._conn()
+        try:
+            total = conn.execute(
+                "SELECT COUNT(*) AS n FROM players WHERE gid=?", (str(gid),)
+            ).fetchone()["n"]
+            rows = conn.execute(
+                "SELECT * FROM players WHERE gid=? ORDER BY cash DESC LIMIT ? OFFSET ?",
+                (str(gid), size, offset),
+            ).fetchall()
+        finally:
+            conn.close()
+        return int(total), [self.normalize(dict(r)) for r in rows]
 
     def find_player_any(self, gid, kw: str) -> dict | None:
         conn = self._conn()
@@ -784,6 +811,17 @@ class DB:
             finally:
                 conn.close()
 
+    def close(self):
+        """卸载时执行 WAL checkpoint 将 -wal 数据并回主库，避免残留。"""
+        try:
+            conn = self._conn()
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            finally:
+                conn.close()
+        except Exception:  # noqa: BLE001
+            pass  # checkpoint 失败不影响 SQLite 正常关闭
+
     def cleanup_old_data(self):
         """定期/后台批量清理超量动态事件、历史流水与已领完的旧红包，防止表无限膨胀。
 
@@ -946,7 +984,13 @@ class DB:
             return None
 
     def last_review_payload(self, gid, cur_year: int, cur_week: int) -> dict | None:
-        y, w = (cur_year, cur_week - 1) if cur_week > 1 else (cur_year - 1, 52)
+        if cur_week > 1:
+            y, w = cur_year, cur_week - 1
+        else:
+            # ISO 8601 可能有 53 周（如 2020/2026/2032），需正确回退
+            prev_year = cur_year - 1
+            _, prev_week, _ = datetime.date(prev_year, 12, 31).isocalendar()
+            y, w = prev_year, prev_week
         data = self.get_archive(gid, y, w)
         if data is None:
             row = self.max_archived_week()
@@ -1017,7 +1061,9 @@ class DB:
             finally:
                 conn.close()
 
-    def withdraw_custom_company_dividend(self, gid: str, boss_uid: str) -> tuple[dict | None, float, str]:
+    def withdraw_custom_company_dividend(
+        self, gid: str, boss_uid: str
+    ) -> tuple[dict | None, float, str]:
         with _write_lock:
             conn = self._conn()
             try:
@@ -1030,7 +1076,9 @@ class DB:
                 balance = float(row["balance"] or 0)
                 if balance <= 0:
                     return dict(row), 0.0, "zero_balance"
-                conn.execute("UPDATE custom_companies SET balance=0 WHERE id=?", (row["id"],))
+                conn.execute(
+                    "UPDATE custom_companies SET balance=0 WHERE id=?", (row["id"],)
+                )
                 conn.commit()
                 return dict(row), balance, "ok"
             finally:
@@ -1181,7 +1229,9 @@ class DB:
                     ),
                 )
                 # 清掉已开票，滚存进下一期
-                conn.execute("DELETE FROM lottery_tickets WHERE draw_date=?", (str(date_str),))
+                conn.execute(
+                    "DELETE FROM lottery_tickets WHERE draw_date=?", (str(date_str),)
+                )
                 carry = round(pool - paid, 2)
                 if carry > 0:
                     tomorrow = _next_date(date_str)
@@ -1190,7 +1240,9 @@ class DB:
                         "ON CONFLICT(draw_date) DO UPDATE SET pool=round(pool+?,2)",
                         (tomorrow, carry, carry),
                     )
-                conn.execute("DELETE FROM lottery_pool WHERE draw_date=?", (str(date_str),))
+                conn.execute(
+                    "DELETE FROM lottery_pool WHERE draw_date=?", (str(date_str),)
+                )
                 conn.commit()
                 return {
                     "date": str(date_str),
@@ -1382,7 +1434,13 @@ class DB:
                 conn.close()
 
     def create_custom_company_if_free(
-        self, gid: str, boss_uid: str, name: str, tag: str, salary: float, balance: float
+        self,
+        gid: str,
+        boss_uid: str,
+        name: str,
+        tag: str,
+        salary: float,
+        balance: float,
     ) -> int | None:
         """仅在老板尚未拥有公司时创建，返回公司 ID；已存在返回 None（防连发竞态）。"""
         with _write_lock:
@@ -1397,7 +1455,15 @@ class DB:
                 cur = conn.execute(
                     "INSERT INTO custom_companies (gid, boss_uid, name, tag, salary, balance, created_at) "
                     "VALUES (?,?,?,?,?,?,?)",
-                    (str(gid), str(boss_uid), str(name), str(tag), float(salary), float(balance), int(time.time())),
+                    (
+                        str(gid),
+                        str(boss_uid),
+                        str(name),
+                        str(tag),
+                        float(salary),
+                        float(balance),
+                        int(time.time()),
+                    ),
                 )
                 conn.commit()
                 return cur.lastrowid
@@ -1448,36 +1514,7 @@ class DB:
             finally:
                 conn.close()
 
-    def create_redpacket(
-        self, gid, sender_uid, sender_name: str, amount: float, count: int
-    ) -> int:
-        with _write_lock:
-            conn = self._conn()
-            try:
-                cur = conn.execute(
-                    "INSERT INTO redpackets (gid, sender_uid, sender_name, total_amount, "
-                    "total_count, remain_amount, remain_count, claimed_records, created_at) "
-                    "VALUES (?,?,?,?,?,?,?,?,?)",
-                    (
-                        str(gid),
-                        str(sender_uid),
-                        sender_name,
-                        float(amount),
-                        int(count),
-                        float(amount),
-                        int(count),
-                        "[]",
-                        int(time.time()),
-                    ),
-                )
-                conn.commit()
-                return cur.lastrowid
-            finally:
-                conn.close()
-
-    def claim_redpacket(
-        self, gid, uid, nickname: str
-    ) -> tuple[str, tuple | None]:
+    def claim_redpacket(self, gid, uid, nickname: str) -> tuple[str, tuple | None]:
         """原子抢红包。
 
         返回 ("ok", (packet, get_amt, remain_amt, remain_cnt))
@@ -1495,7 +1532,10 @@ class DB:
                 if not row:
                     return "empty", None
                 packet = dict(row)
-                claimed = json.loads(packet["claimed_records"] or "[]")
+                try:
+                    claimed = json.loads(packet["claimed_records"] or "[]")
+                except (json.JSONDecodeError, TypeError):
+                    claimed = []
                 if any(str(r.get("uid")) == str(uid) for r in claimed):
                     return "already", None
 
@@ -1509,7 +1549,9 @@ class DB:
                 else:
                     max_possible = (remain_amt / remain_cnt) * 2
                     get_amt = round(random.uniform(0.5, max_possible), 2)
-                    get_amt = max(0.1, min(get_amt, remain_amt - (remain_cnt - 1) * 0.1))
+                    get_amt = max(
+                        0.1, min(get_amt, remain_amt - (remain_cnt - 1) * 0.1)
+                    )
                     get_amt = round(min(get_amt, remain_amt), 2)  # 兜底：不超剩余总额
                     if get_amt <= 0:
                         get_amt = remain_amt
@@ -1667,4 +1709,3 @@ def _next_date(date_str: str) -> str:
     """YYYY-MM-DD 的下一天（彩票开奖滚存用）。"""
     y, m, d = (int(x) for x in str(date_str).split("-"))
     return (datetime.date(y, m, d) + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-

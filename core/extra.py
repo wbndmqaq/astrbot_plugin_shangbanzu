@@ -14,6 +14,7 @@ def _load_skills():
     """从 JSON 文件加载技能列表"""
     try:
         from . import gamedata as gd
+
         return list(gd.skills().keys())
     except Exception:
         # 兜底：如果文件不存在或解析失败，使用硬编码列表
@@ -38,12 +39,17 @@ async def year_bonus(db, gid, uid, nickname, cfg):
     streak = int(p["attend_streak"])
     lvl_factor = float(logic.cfg_get(cfg, "year_bonus_level_factor", 0.3))
     streak_factor = float(logic.cfg_get(cfg, "year_bonus_streak_factor", 0.02))
-    base = float(p["salary"]) * (1 + lvl * lvl_factor + min(streak, 20) * streak_factor)
+    streak_cap = int(logic.cfg_get(cfg, "attend_streak_bonus_days", 20))
+    base = float(p["salary"]) * (
+        1 + lvl * lvl_factor + min(streak, streak_cap) * streak_factor
+    )
     jackpot_rate = float(logic.cfg_get(cfg, "year_bonus_jackpot_rate", 0.05))
     good_rate = float(logic.cfg_get(cfg, "year_bonus_good_rate", 0.25))
     roll = random.random()
     if roll < jackpot_rate:
-        bonus = round(base * float(logic.cfg_get(cfg, "year_bonus_jackpot_multi", 3.0)), 2)
+        bonus = round(
+            base * float(logic.cfg_get(cfg, "year_bonus_jackpot_multi", 3.0)), 2
+        )
         line = logic.pick(gd.t("extra", "yearbonus_ok"))
         title, accent, icon = "年终奖翻倍！！", "#ffd86f", "🎉"
     elif roll < jackpot_rate + good_rate:
@@ -112,9 +118,7 @@ async def learn_skill(db, gid, uid, nickname, cfg, skill):
         p["_skills"] = skills
         line = logic.pick(gd.t("extra", "skill_learn_ok"))
         await asyncio.to_thread(db.save_player, p)
-        await asyncio.to_thread(
-            db.add_transaction, gid, uid, "技能学费", -cost, skill
-        )
+        await asyncio.to_thread(db.add_transaction, gid, uid, "技能学费", -cost, skill)
         return R(
             tmpl="panel",
             data={
@@ -141,14 +145,19 @@ async def learn_skill(db, gid, uid, nickname, cfg, skill):
             "title": "学习失败",
             "accent": "#fc6262",
             "lines": [line],
-            "blocks": [{"label": "学费", "value": f"-{logic.fmt_money(cost)} 元（打水漂）"}],
+            "blocks": [
+                {"label": "学费", "value": f"-{logic.fmt_money(cost)} 元（打水漂）"}
+            ],
         },
         text=f"学习失败：{line}",
     )
 
 
 async def my_skills(db, gid, uid, nickname, cfg):
-    p = await asyncio.to_thread(db.get_player, gid, uid, nickname)
+    # 纯查看命令，不能 get_player 给陌生 ID 顺手建号
+    p = await asyncio.to_thread(db.find_player_any, gid, uid)
+    if not p:
+        return R(err="你还没有档案，先发一次「上班」建档吧")
     skills = _skills(p)
     all_sk = "、".join(SKILL_LIST)
     owned = "、".join(skills) if skills else "暂无"
@@ -231,7 +240,11 @@ async def social_network(db, gid, me, target, nickname, cfg, target_name=""):
                     {
                         "label": "奶茶钱",
                         "value": f"-{logic.fmt_money(cost)} 元"
-                        + (f"（TA 也赚了 {logic.fmt_money(reward)}）" if reward > 0 else ""),
+                        + (
+                            f"（TA 也赚了 {logic.fmt_money(reward)}）"
+                            if reward > 0
+                            else ""
+                        ),
                     },
                     {"label": "人脉值", "value": f"+{gain}（当前 {p['social_pts']}）"},
                     {"label": "精神", "value": f"+5（当前 {p['mind']}）"},
@@ -340,7 +353,9 @@ async def gossip(db, gid, uid, nickname):
     a, b = random.sample(players, 2)
     an = a.get("card") or a["nickname"] or f"用户{a['uid']}"
     bn = b.get("card") or b["nickname"] or f"用户{b['uid']}"
-    text = random.choice(gd.t("extra", "gossip_texts"))
+    text = logic.pick(gd.t("extra", "gossip_texts"))
+    if not text:
+        text = "今天办公室风平浪静，没有任何八卦。"
     gossip = text.replace("{a}", an).replace("{b}", bn)
     return R(
         tmpl="panel",
@@ -356,12 +371,49 @@ async def gossip(db, gid, uid, nickname):
 
 
 ACHIEVEMENTS_DEF = [
-    {"id": "work_10", "name": "全勤劳模", "desc": "连续出勤达到10天", "cond": lambda p: int(p.get("attend_streak") or 0) >= 10},
-    {"id": "wealth_100k", "name": "富甲一方", "desc": "总资产达到10万元", "cond": lambda p: (float(p.get("cash") or 0) + float(p.get("deposit") or 0) + float(p.get("fund") or 0)) >= 100000},
-    {"id": "duel_king", "name": "PPT战神", "desc": "对线撕逼胜利达到10次", "cond": lambda p: int(p.get("duel_wins") or 0) >= 10},
-    {"id": "emperor", "name": "打工皇帝", "desc": "职级达到合伙人·打工皇帝", "cond": lambda p: int(p.get("lvl") or 1) >= 11},
-    {"id": "pet_lover", "name": "铲屎大官人", "desc": "成功领养一只宠物", "cond": lambda p: bool(p.get("pet"))},
-    {"id": "homeowner", "name": "有房一族", "desc": "全款买下自购小窝", "cond": lambda p: int(p.get("house_owned") or 0) >= 1},
+    {
+        "id": "work_10",
+        "name": "全勤劳模",
+        "desc": "连续出勤达到10天",
+        "cond": lambda p: int(p.get("attend_streak") or 0) >= 10,
+    },
+    {
+        "id": "wealth_100k",
+        "name": "富甲一方",
+        "desc": "总资产达到10万元",
+        "cond": lambda p: (
+            (
+                float(p.get("cash") or 0)
+                + float(p.get("deposit") or 0)
+                + float(p.get("fund") or 0)
+            )
+            >= 100000
+        ),
+    },
+    {
+        "id": "duel_king",
+        "name": "PPT战神",
+        "desc": "对线撕逼胜利达到10次",
+        "cond": lambda p: int(p.get("duel_wins") or 0) >= 10,
+    },
+    {
+        "id": "emperor",
+        "name": "打工皇帝",
+        "desc": "职级达到合伙人·打工皇帝",
+        "cond": lambda p: int(p.get("lvl") or 1) >= 11,
+    },
+    {
+        "id": "pet_lover",
+        "name": "铲屎大官人",
+        "desc": "成功领养一只宠物",
+        "cond": lambda p: bool(p.get("pet")),
+    },
+    {
+        "id": "homeowner",
+        "name": "有房一族",
+        "desc": "全款买下自购小窝",
+        "cond": lambda p: int(p.get("house_owned") or 0) >= 1,
+    },
 ]
 
 
@@ -370,14 +422,14 @@ async def my_achievements(db, gid, uid, nickname, cfg):
     p = await logic.load_player(db, gid, uid, nickname, cfg)
     unlocked = set(json.loads(p.get("achievements") or "[]"))
     new_unlocked = []
-    
+
     for ach in ACHIEVEMENTS_DEF:
         if ach["id"] not in unlocked and ach["cond"](p):
             unlocked.add(ach["id"])
             new_unlocked.append(ach["name"])
-            
+
     if new_unlocked:
-        p["achievements"] = json.dumps(list(unlocked))
+        p["achievements"] = json.dumps(sorted(unlocked))
         await asyncio.to_thread(db.save_player, p)
 
     rows = []
@@ -396,11 +448,15 @@ async def my_achievements(db, gid, uid, nickname, cfg):
             "lines": rows,
             "blocks": [
                 {"label": "当前称号", "value": cur_title},
-                {"label": "解锁进度", "value": f"{len(unlocked)} / {len(ACHIEVEMENTS_DEF)}"},
+                {
+                    "label": "解锁进度",
+                    "value": f"{len(unlocked)} / {len(ACHIEVEMENTS_DEF)}",
+                },
             ],
             "foot": "发送「佩戴称号 称号名」或「卸下称号」佩戴展示",
         },
-        text=f"🎖️ 我的成就 ({len(unlocked)}/{len(ACHIEVEMENTS_DEF)})，当前称号：{cur_title}\n" + "\n".join(rows),
+        text=f"🎖️ 我的成就 ({len(unlocked)}/{len(ACHIEVEMENTS_DEF)})，当前称号：{cur_title}\n"
+        + "\n".join(rows),
     )
 
 
@@ -410,10 +466,19 @@ async def set_title(db, gid, uid, nickname, title_name, cfg):
     unlocked = set(json.loads(p.get("achievements") or "[]"))
     title_name = (title_name or "").strip()
     if not title_name:
-        return R(err="请输入要佩戴的称号名称，例如：「佩戴称号 全勤劳模」，发送「我的成就」查看已解锁称号")
+        return R(
+            err="请输入要佩戴的称号名称，例如：「佩戴称号 全勤劳模」，发送「我的成就」查看已解锁称号"
+        )
 
     # 匹配称号
-    target = next((ach for ach in ACHIEVEMENTS_DEF if ach["name"] == title_name or title_name in ach["name"]), None)
+    target = next(
+        (
+            ach
+            for ach in ACHIEVEMENTS_DEF
+            if ach["name"] == title_name or title_name in ach["name"]
+        ),
+        None,
+    )
     if not target:
         return R(err=f"未找到称号「{title_name}」，发送「我的成就」查看列表")
     if target["id"] not in unlocked:
@@ -427,7 +492,9 @@ async def set_title(db, gid, uid, nickname, title_name, cfg):
             "icon": "✨",
             "title": "称号佩戴成功",
             "accent": "#6fe08c",
-            "lines": [f"已成功佩戴专属职场头衔：【{target['name']}】！将在个人名片与对决中展示。"],
+            "lines": [
+                f"已成功佩戴专属职场头衔：【{target['name']}】！将在个人名片与对决中展示。"
+            ],
             "blocks": [
                 {"label": "当前头衔", "value": f"🎖️ {target['name']}"},
                 {"label": "成就描述", "value": target["desc"]},
@@ -461,7 +528,9 @@ async def send_redpacket(db, gid, uid, nickname, amount_str, count_str, cfg):
     max_cnt = int(logic.cfg_get(cfg, "redpacket_max_count", 50))
     cnt = logic.parse_int(count_str, lo=1, hi=max_cnt)
     if amt is None or cnt is None:
-        return R(err="格式错误！请发送：「发红包 <总金额> <个数>」，例如：「发红包 1000 5」")
+        return R(
+            err="格式错误！请发送：「发红包 <总金额> <个数>」，例如：「发红包 1000 5」"
+        )
 
     min_packet = float(logic.cfg_get(cfg, "redpacket_min_amount", 10.0))
     if amt < min_packet or amt < cnt:
@@ -489,10 +558,16 @@ async def send_redpacket(db, gid, uid, nickname, amount_str, count_str, cfg):
             else "发红包失败，请稍后再试"
         )
         return R(err=msg)
-    await asyncio.to_thread(db.add_transaction, gid, uid, "发群红包", -amt, f"{cnt}个红包")
+    await asyncio.to_thread(
+        db.add_transaction, gid, uid, "发群红包", -amt, f"{cnt}个红包"
+    )
 
     await asyncio.to_thread(
-        db.add_event, gid, uid, "发红包", f"{p['nickname'] or uid} 豪气撒币发送了 {logic.fmt_money(amt)} 元拼手气红包（共 {cnt} 个）！"
+        db.add_event,
+        gid,
+        uid,
+        "发红包",
+        f"{p['nickname'] or uid} 豪气撒币发送了 {logic.fmt_money(amt)} 元拼手气红包（共 {cnt} 个）！",
     )
     return R(
         tmpl="panel",
@@ -523,7 +598,9 @@ async def claim_redpacket(db, gid, uid, nickname, cfg):
         db.claim_redpacket, str(gid), str(uid), p["nickname"] or uid
     )
     if status == "empty":
-        return R(err="当前群内没有未领完的红包，发送「发红包 1000 5」自己当老板发一个吧！")
+        return R(
+            err="当前群内没有未领完的红包，发送「发红包 1000 5」自己当老板发一个吧！"
+        )
     if status == "already":
         return R(err="你已经抢过这个红包了，给其他群友留点机会吧！")
     if not res:
@@ -533,7 +610,14 @@ async def claim_redpacket(db, gid, uid, nickname, cfg):
     # 入账走原子列更新：抢红包瞬间他人转账/打卡入账不会被快照覆盖
     await asyncio.to_thread(db.credit_income, gid, uid, float(get_amt))
     p = await asyncio.to_thread(db.get_player, gid, uid)
-    await asyncio.to_thread(db.add_transaction, gid, uid, "抢群红包", get_amt, f"来自 {packet['sender_name']}")
+    await asyncio.to_thread(
+        db.add_transaction,
+        gid,
+        uid,
+        "抢群红包",
+        get_amt,
+        f"来自 {packet['sender_name']}",
+    )
 
     return R(
         tmpl="panel",
@@ -545,7 +629,10 @@ async def claim_redpacket(db, gid, uid, nickname, cfg):
             "blocks": [
                 {"label": "抢到金额", "value": f"+{logic.fmt_money(get_amt)} 元"},
                 {"label": "个人现金", "value": f"{logic.fmt_money(p['cash'])} 元"},
-                {"label": "红包剩余", "value": f"{new_remain_cnt} 个（{logic.fmt_money(new_remain_amt)} 元）"},
+                {
+                    "label": "红包剩余",
+                    "value": f"{new_remain_cnt} 个（{logic.fmt_money(new_remain_amt)} 元）",
+                },
             ],
             "foot": "恭喜发财，大吉大利！",
         },
@@ -563,7 +650,9 @@ async def scratch_lottery(db, gid, uid, nickname, cfg):
             err=f"彩票站限购，冷却中：{logic.fmt_remaining(logic.cd_left(p, 'scratch'))}"
         )
     if float(p["cash"]) < cost:
-        return R(err=f"刮一张「职场刮刮乐」需要 {logic.fmt_money(cost)} 元，当前余额不足")
+        return R(
+            err=f"刮一张「职场刮刮乐」需要 {logic.fmt_money(cost)} 元，当前余额不足"
+        )
 
     logic.cd_set(p, "scratch", cd)
     p["cash"] = round(max(0.0, float(p["cash"]) - cost), 2)
@@ -593,7 +682,9 @@ async def scratch_lottery(db, gid, uid, nickname, cfg):
         p["total_earned"] = round(float(p.get("total_earned") or 0) + reward, 2)
 
     await asyncio.to_thread(db.save_player, p)
-    await asyncio.to_thread(db.add_transaction, gid, uid, "刮刮乐", reward - cost, prize_name)
+    await asyncio.to_thread(
+        db.add_transaction, gid, uid, "刮刮乐", reward - cost, prize_name
+    )
 
     return R(
         tmpl="panel",
@@ -603,7 +694,10 @@ async def scratch_lottery(db, gid, uid, nickname, cfg):
             "accent": color,
             "lines": [f"刮开图层：【{prize_name}】！"],
             "blocks": [
-                {"label": "中奖金额", "value": f"{logic.fmt_money(reward)} 元" if reward > 0 else "0 元"},
+                {
+                    "label": "中奖金额",
+                    "value": f"{logic.fmt_money(reward)} 元" if reward > 0 else "0 元",
+                },
                 {"label": "刮刮乐花费", "value": f"-{logic.fmt_money(cost)} 元"},
                 {"label": "个人现金", "value": f"{logic.fmt_money(p['cash'])} 元"},
             ],
@@ -611,4 +705,3 @@ async def scratch_lottery(db, gid, uid, nickname, cfg):
         },
         text=f"🎫 刮刮乐开奖：【{prize_name}】获得 {logic.fmt_money(reward)} 元！当前现金 {logic.fmt_money(p['cash'])} 元",
     )
-

@@ -25,6 +25,8 @@ async def meeting(ctx_db, gid, uid, nickname, cfg):
         return R(err="今天已经开过会了")
     p["meeting_day"] = today
     ev = logic.pick(gd.t("extra3", "meeting"))
+    if not isinstance(ev, dict):
+        ev = {"text": "会议取消，无事发生", "mind": 0, "exp": 0}
     p["mind"] = float(p["mind"]) + ev.get("mind", 0)
     p["exp"] = int(p["exp"]) + ev.get("exp", 0)
     logic.clamp_status(p)
@@ -328,6 +330,8 @@ async def pet_interact(ctx_db, gid, uid, nickname):
         return R(err="今天已经陪过宠物了，明天再来")
     p["pet_day"] = today
     ev = logic.pick(gd.t("extra3", "pet_interact"))
+    if not isinstance(ev, dict):
+        ev = {"text": "宠物今天很安静", "mind": 5, "health": 0}
     p["mind"] = round(float(p["mind"]) + ev.get("mind", 5), 1)
     if ev.get("health"):
         p["health"] = round(float(p["health"]) + ev["health"], 1)
@@ -413,6 +417,8 @@ async def get_cert(ctx_db, gid, uid, nickname, cert_name, cfg):
 async def travel(ctx_db, gid, uid, nickname, cfg):
     p = await logic.load_player(ctx_db, gid, uid, nickname, cfg)
     dests = gd.t("extra3", "travel")
+    if not dests:
+        return R(err="暂时没有可去的旅行目的地")
     dest = random.choice(dests)
     if float(p["cash"]) < dest["cost"]:
         return R(

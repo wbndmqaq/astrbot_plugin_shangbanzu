@@ -315,7 +315,10 @@ async def shop_buy(db, gid, uid, nickname, keyword, cfg):
 
 
 async def resume(db, gid, uid, nickname, app_id: str = ""):
-    p = await asyncio.to_thread(db.get_player, gid, uid, nickname)
+    # 简历是纯查看命令，不能 get_player 顺手给陌生 ID 建号
+    p = await asyncio.to_thread(db.find_player_any, gid, uid)
+    if not p:
+        return R(err="你还没有简历，先发一次「上班」建档吧")
     comp = await asyncio.to_thread(gd.resolve_company, int(p["company"]), db)
     pos = gd.position(int(p["lvl"]))
     pos_list = gd.positions()
@@ -470,9 +473,13 @@ async def team_building(db, gid, uid, nickname, cfg):
         return R(
             err=f"刚被团建完，缓一缓：剩余 {logic.fmt_remaining(logic.cd_left(p, 'teambuild'))}"
         )
-    logic.cd_set(p, "teambuild", 7 * 86400)
+    logic.cd_set(
+        p, "teambuild", logic.cfg_get(cfg, "teambuild_cooldown_days", 7) * 86400
+    )
 
     ev = logic.pick(gd.t("life", "teambuild"))
+    if not isinstance(ev, dict):
+        ev = {"text": "团建取消", "cash": 0, "health": 0, "mind": 0, "exp": 1}
     # 文案里 cash 字段缺失或异常时按 0 处理；非正数也钳到 0，避免「垫付负数 = 报销反向」账目错位
     spend = max(0, int(ev.get("cash", 0) or 0))
     p["cash"] = round(max(0.0, float(p["cash"]) - spend), 2)
@@ -515,19 +522,34 @@ async def shopping(db, gid, uid, nickname, cfg):
         return R(
             err=f"钱包还在流泪，冷静一下：剩余 {logic.fmt_remaining(logic.cd_left(p, 'shopping'))}"
         )
-    logic.cd_set(p, "shopping", 6 * 3600)
 
-    budgets = list(logic.cfg_get(cfg, "shopping_budgets", [99, 299, 999]) or [99, 299, 999])
+    budgets = list(
+        logic.cfg_get(cfg, "shopping_budgets", [99, 299, 999]) or [99, 299, 999]
+    )
     weights = list(logic.cfg_get(cfg, "shopping_weights", [60, 30, 10]) or [60, 30, 10])
     # 配置写歪时退回等权，避免 random.choices 抛异常后变成永久兜底
     if len(weights) != len(budgets):
         weights = [1.0] * len(budgets)
     budget = random.choices(budgets, weights=weights)[0]
+
+    # 余额校验：现金不足以支付最高预算则拒绝下单，避免 max(0, cash-pay) 免费购物
+    if float(p["cash"]) < budget:
+        return R(
+            err=f"余额不足，本次购物预算 {budget} 元，你只有 {logic.fmt_money(p['cash'])} 元，先去赚钱吧"
+        )
+
+    logic.cd_set(p, "shopping", logic.cfg_get(cfg, "shopping_cooldown_hours", 6) * 3600)
     roll = random.random()
-    if roll < 0.15:
-        shipping = round(budget * 0.1, 2)
+    refund_rate = float(logic.cfg_get(cfg, "shopping_refund_rate", 0.15))
+    deal_rate = float(logic.cfg_get(cfg, "shopping_deal_rate", 0.30))
+    if roll < refund_rate:
+        shipping = round(
+            budget * float(logic.cfg_get(cfg, "shopping_shipping_rate", 0.1)), 2
+        )
         p["cash"] = round(max(0.0, float(p["cash"]) - shipping), 2)
-        p["mind"] = round(float(p["mind"]) + 5, 1)
+        p["mind"] = round(
+            float(p["mind"]) + float(logic.cfg_get(cfg, "shopping_refund_mind", 5)), 1
+        )
         note, title, accent = (
             f"凑单失误后成功退货，只花了运费 {shipping} 元",
             "退货小能手",
@@ -542,9 +564,15 @@ async def shopping(db, gid, uid, nickname, cfg):
             "退货成功仅付运费",
         )
         outcome = "refund"
-    elif roll < 0.30:
-        saved = random.randint(20, min(200, budget))
-        pay = budget - saved
+    elif roll < deal_rate:
+        # 预算过低（<20）时 randint(20, ...) 会抛 ValueError，且"省下"会变负数，
+        # 直接按原价购买处理，保证任何配置都不致购物崩溃或负向套利。
+        if budget < 20:
+            pay = budget
+            saved = 0
+        else:
+            saved = random.randint(20, min(200, budget))
+            pay = budget - saved
         p["cash"] = round(max(0.0, float(p["cash"]) - pay), 2)
         p["mind"] = round(float(p["mind"]) + 18, 1)
         note = f"蹲到满减神券，原价 {budget} 只付了 {pay} 元，省下的都是赚的"
@@ -804,8 +832,10 @@ async def use_item(db, gid, uid, nickname, item_name, cfg):
     bag = json.loads(p.get("items") or "{}")
     item_name = (item_name or "").strip()
     if not item_name:
-        return R(err="请指定要使用的道具名，例如：「使用 咖啡续命包」，发送「我的背包」查看持有道具")
-    
+        return R(
+            err="请指定要使用的道具名，例如：「使用 咖啡续命包」，发送「我的背包」查看持有道具"
+        )
+
     # 匹配道具 key
     target_key = None
     target_item = None
@@ -827,17 +857,23 @@ async def use_item(db, gid, uid, nickname, item_name, cfg):
     # 触发道具效果
     msg_lines = []
     if target_key == "coffee_pack":
-        p["health"] = round(logic.clamp(float(p["health"]) + 30, 0, 100), 1)
-        p["mind"] = round(logic.clamp(float(p["mind"]) + 30, 0, 100), 1)
+        coffee_health = float(logic.cfg_get(cfg, "coffee_pack_health_bonus", 30))
+        coffee_mind = float(logic.cfg_get(cfg, "coffee_pack_mind_bonus", 30))
+        p["health"] = round(logic.clamp(float(p["health"]) + coffee_health, 0, 100), 1)
+        p["mind"] = round(logic.clamp(float(p["mind"]) + coffee_mind, 0, 100), 1)
         # 清除加班 CD
         cds = p.setdefault("_cds", {})
         cds.pop("ot", None)
-        msg_lines.append("喝下顶级特调咖啡，瞬间满血复活！健康+30，精神+30，加班疲劳已重置！")
+        msg_lines.append(
+            f"喝下顶级特调咖啡，瞬间满血复活！健康+{int(coffee_health) if coffee_health == int(coffee_health) else coffee_health}，精神+{int(coffee_mind) if coffee_mind == int(coffee_mind) else coffee_mind}，加班疲劳已重置！"
+        )
     elif target_key == "shield":
         # 写入护盾标记
         cds = p.setdefault("_cds", {})
         cds["shield_active"] = 1
-        msg_lines.append("【防甩锅护盾】已装配！将自动抵挡下一次摸鱼被抓或撕逼对线失败的惩罚。")
+        msg_lines.append(
+            "【防甩锅护盾】已装配！将自动抵挡下一次摸鱼被抓或撕逼对线失败的惩罚。"
+        )
     elif target_key == "poop":
         cds = p.setdefault("_cds", {})
         cds["poop_active"] = 1
@@ -845,7 +881,9 @@ async def use_item(db, gid, uid, nickname, item_name, cfg):
     elif target_key == "radar":
         # 探测全群摸鱼风险与今日早报
         msg_lines.append(f"【老板雷达】今日职场大盘：{gd.news_of_day()}")
-        msg_lines.append(f"当前全服裁员概率倍率：{float(logic.cfg_get(cfg, 'layoff_scale', 1.0)):.1f}x")
+        msg_lines.append(
+            f"当前全服裁员概率倍率：{float(logic.cfg_get(cfg, 'layoff_scale', 1.0)):.1f}x"
+        )
         msg_lines.append("老板动向：HR 正在巡视工位，摸鱼请留意！")
 
     await asyncio.to_thread(db.save_player, p)
@@ -864,4 +902,3 @@ async def use_item(db, gid, uid, nickname, item_name, cfg):
         },
         text=f"使用「{target_item['name']}」成功：" + " ".join(msg_lines),
     )
-

@@ -77,7 +77,9 @@ async def find_job(db, gid, uid, nickname, cfg, want: str = ""):
         success_rate = float(logic.cfg_get(cfg, "job_apply_auto_rate", 0.92))
 
     if random.random() > success_rate:
-        logic.cd_set(p, "job", float(logic.cfg_get(cfg, "job_cooldown_minutes", 10)) * 60)
+        logic.cd_set(
+            p, "job", float(logic.cfg_get(cfg, "job_cooldown_minutes", 10)) * 60
+        )
         await asyncio.to_thread(db.save_player, p)
         fail_line = logic.pick(gd.t("work", "job_fail"))
         return R(
@@ -142,7 +144,9 @@ async def checkin(db, gid, uid, nickname, cfg):
 
     if scale > 0 and logic.weighted_layoff(comp["risk"], scale):
         severance = round(
-            float(p["salary"]) * float(logic.cfg_get(cfg, "layoff_severance_rate", 0.3)), 2
+            float(p["salary"])
+            * float(logic.cfg_get(cfg, "layoff_severance_rate", 0.3)),
+            2,
         )
         p["company"] = -1
         p["salary"] = 0.0
@@ -200,9 +204,7 @@ async def checkin(db, gid, uid, nickname, cfg):
         float(logic.cfg_get(cfg, "checkin_perf_min", 0.85)),
         float(logic.cfg_get(cfg, "checkin_perf_max", 1.25)),
     )
-    pay = logic.daily_pay(
-        float(p["salary"]), perf, int(p["attend_streak"]), cfg=cfg
-    )
+    pay = logic.daily_pay(float(p["salary"]), perf, int(p["attend_streak"]), cfg=cfg)
 
     commute = gd.commute_mode(str(p.get("commute") or ""))
     commute_mode = str(commute["name"])
@@ -214,11 +216,16 @@ async def checkin(db, gid, uid, nickname, cfg):
         await asyncio.to_thread(
             db.add_transaction, gid, uid, "通勤", -c_cost, commute_mode
         )
-    p["health"] = float(p["health"]) + c_hp
-    p["mind"] = float(p["mind"]) + c_mind
+        p["health"] = float(p["health"]) + c_hp
+        p["mind"] = float(p["mind"]) + c_mind
+    else:
+        # 余额不足付通勤费，按步行处理：不扣费也不加通勤效果
+        commute_mode = "步行（余额不足）"
 
     if late:
-        pay = round(pay * (1 - float(logic.cfg_get(cfg, "late_pay_penalty_rate", 0.2))), 2)
+        pay = round(
+            pay * (1 - float(logic.cfg_get(cfg, "late_pay_penalty_rate", 0.2))), 2
+        )
         p["mind"] = float(p["mind"]) - 3
         lines.append(logic.pick(gd.t("work", "commute_late")))
 
@@ -240,15 +247,21 @@ async def checkin(db, gid, uid, nickname, cfg):
     )
 
     hp_down = round(
-        comp["intensity"] * float(logic.cfg_get(cfg, "work_intensity_health_factor", 0.4)), 1
+        comp["intensity"]
+        * float(logic.cfg_get(cfg, "work_intensity_health_factor", 0.4)),
+        1,
     )
     mind_down = round(
-        comp["intensity"] * float(logic.cfg_get(cfg, "work_intensity_mind_factor", 0.25)), 1
+        comp["intensity"]
+        * float(logic.cfg_get(cfg, "work_intensity_mind_factor", 0.25)),
+        1,
     )
     p["health"] = round(float(p["health"]) - hp_down + h["recover"], 1)
     p["mind"] = round(float(p["mind"]) - mind_down + h["recover"] * 0.5, 1)
 
     ev = logic.pick(gd.t("work", "checkin_events"))
+    if not isinstance(ev, dict):
+        ev = {"text": "平淡的一天", "cash": 0, "health": 0, "mind": 0, "exp": 0}
     ev_cash = ev.get("cash", 0)
     p["cash"] = round(max(0.0, float(p["cash"]) + ev_cash), 2)
     p["health"] = float(p["health"]) + ev.get("health", 0)
@@ -269,10 +282,12 @@ async def checkin(db, gid, uid, nickname, cfg):
     profit_rate = float(logic.cfg_get(cfg, "custom_company_profit_rate", 0.15))
     if comp.get("is_custom") and comp.get("custom_id") and profit_rate > 0:
         profit = round(pay * profit_rate, 2)
-        await asyncio.to_thread(db.add_custom_company_balance, comp["custom_id"], profit)
+        await asyncio.to_thread(
+            db.add_custom_company_balance, comp["custom_id"], profit
+        )
 
     lines.append(ev["text"])
-    if random.random() < 0.05:
+    if random.random() < float(logic.cfg_get(cfg, "layoff_safe_event_rate", 0.05)):
         lines.append(logic.pick(gd.t("work", "layoff_safe")))
     blocks.extend(
         [
@@ -311,7 +326,11 @@ async def checkin(db, gid, uid, nickname, cfg):
         },
         text=(
             f"打卡成功！实发 {logic.fmt_money(net_pay)} 元"
-            + (f"（迟到，按 {(1 - float(logic.cfg_get(cfg, 'late_pay_penalty_rate', 0.2))) * 100:g}% 计薪）" if late else "")
+            + (
+                f"（迟到，按 {(1 - float(logic.cfg_get(cfg, 'late_pay_penalty_rate', 0.2))) * 100:g}% 计薪）"
+                if late
+                else ""
+            )
             + f"｜五险一金 -{logic.fmt_money(insurance)}｜健康 {p['health']}｜精神 {p['mind']}\n{ev['text']}"
         ),
     )
@@ -333,9 +352,7 @@ async def slack(db, gid, uid, nickname, cfg):
     shield = cds.get("shield_active")
     poop = cds.pop("poop_active", None)
 
-    caught_prob = (
-        0.0 if poop else float(logic.cfg_get(cfg, "slack_caught_rate", 0.15))
-    )
+    caught_prob = 0.0 if poop else float(logic.cfg_get(cfg, "slack_caught_rate", 0.15))
     if random.random() < caught_prob:
         if shield:
             cds.pop("shield_active", None)
@@ -346,7 +363,9 @@ async def slack(db, gid, uid, nickname, cfg):
                     "icon": "🛡️",
                     "title": "摸鱼被抓 · 护盾生效！",
                     "accent": "#ffd86f",
-                    "lines": ["HR 突然巡视，你装配的【防甩锅护盾】瞬间抵挡了一切罚款！"],
+                    "lines": [
+                        "HR 突然巡视，你装配的【防甩锅护盾】瞬间抵挡了一切罚款！"
+                    ],
                     "blocks": [
                         {"label": "护盾状态", "value": "已消耗 1 层"},
                         {"label": "罚款减免", "value": "100%"},
@@ -407,7 +426,6 @@ async def slack(db, gid, uid, nickname, cfg):
     )
 
 
-
 async def overtime(db, gid, uid, nickname, cfg):
     p = await logic.load_player(db, gid, uid, nickname, cfg)
     if int(p["company"]) == -1:
@@ -420,6 +438,8 @@ async def overtime(db, gid, uid, nickname, cfg):
     logic.cd_set(p, "ot", cd)
 
     ev = logic.pick(gd.t("work", "overtime_events"))
+    if not isinstance(ev, dict):
+        ev = {"text": "加班结束", "health": -8, "mind": -4, "exp": 4}
     # 技能加成：每掌握一门技能，加班收益 +2%
     per_skill = float(logic.cfg_get(cfg, "skill_overtime_bonus_rate", 0.02))
     skill_bonus = 1 + per_skill * len(p.get("_skills", []) or [])
@@ -456,7 +476,17 @@ async def overtime(db, gid, uid, nickname, cfg):
         logic.cfg_get(cfg, "hospital_rate", 0.35)
     ):
         hospitalized = True
-        medical = round(min(3000.0, max(200.0, float(p["cash"]) * 0.25)), 2)
+        medical = round(
+            min(
+                float(logic.cfg_get(cfg, "hospital_cost_max", 3000.0)),
+                max(
+                    float(logic.cfg_get(cfg, "hospital_cost_min", 200.0)),
+                    float(p["cash"])
+                    * float(logic.cfg_get(cfg, "hospital_cost_rate", 0.25)),
+                ),
+            ),
+            2,
+        )
         p["cash"] = round(max(0.0, float(p["cash"]) - medical), 2)
         p["health"] = 45.0
         p["mind"] = float(p["mind"]) - 10
@@ -517,13 +547,15 @@ async def take_leave(db, gid, uid, nickname, cfg):
         return R(err=f"本周 {limit} 次请假额度已用完，全勤奖它不香吗")
     p["leave_count"] = int(p["leave_count"]) + 1
     p["attend_streak"] = 0
-    p["mind"] = round(float(p["mind"]) + float(logic.cfg_get(cfg, "leave_mind_gain", 15)), 1)
-    p["health"] = round(
-        float(p["health"]) + float(logic.cfg_get(cfg, "leave_health_gain", 8)), 1
-    )
+    mind_gain = float(logic.cfg_get(cfg, "leave_mind_gain", 15))
+    health_gain = float(logic.cfg_get(cfg, "leave_health_gain", 8))
+    p["mind"] = round(float(p["mind"]) + mind_gain, 1)
+    p["health"] = round(float(p["health"]) + health_gain, 1)
     logic.clamp_status(p)
     await asyncio.to_thread(db.save_player, p)
     line = logic.pick(gd.t("work", "leave_texts"))
+    mg = int(mind_gain) if mind_gain == int(mind_gain) else mind_gain
+    hg = int(health_gain) if health_gain == int(health_gain) else health_gain
     return R(
         tmpl="panel",
         data={
@@ -533,8 +565,8 @@ async def take_leave(db, gid, uid, nickname, cfg):
             "lines": [line],
             "blocks": [
                 {"label": "今日薪资", "value": "0 元（请假无薪）"},
-                {"label": "精神", "value": f"+15（当前 {p['mind']}）"},
-                {"label": "健康", "value": f"+8（当前 {p['health']}）"},
+                {"label": "精神", "value": f"+{mg}（当前 {p['mind']}）"},
+                {"label": "健康", "value": f"+{hg}（当前 {p['health']}）"},
                 {
                     "label": "本周剩余额度",
                     "value": f"{limit - int(p['leave_count'])} 次",
@@ -542,9 +574,8 @@ async def take_leave(db, gid, uid, nickname, cfg):
             ],
             "foot": "连续出勤已中断，明天记得重新打卡",
         },
-        text=f"请假成功！精神+15 健康+8。{line}",
+        text=f"请假成功！精神+{mg} 健康+{hg}。{line}",
     )
-
 
 
 async def promote(db, gid, uid, nickname, cfg):
@@ -621,13 +652,14 @@ async def promote(db, gid, uid, nickname, cfg):
     p["mind"] = float(p["mind"]) - 8
     logic.clamp_status(p)
     await asyncio.to_thread(db.save_player, p)
+    fail_line = logic.pick(gd.t("work", "promote_fail"))
     return R(
         tmpl="panel",
         data={
             "icon": "😞",
             "title": "晋升失败",
             "accent": "#fc6262",
-            "lines": [logic.pick(gd.t("work", "promote_fail"))],
+            "lines": [fail_line],
             "blocks": [
                 {"label": "本次成功率", "value": f"{rate * 100:.0f}%"},
                 {
@@ -637,7 +669,7 @@ async def promote(db, gid, uid, nickname, cfg):
                 {"label": "精神", "value": f"{p['mind']} / 100"},
             ],
         },
-        text=f"晋升失败（成功率 {rate * 100:.0f}%）：{logic.pick(gd.t('work', 'promote_fail'))}",
+        text=f"晋升失败（成功率 {rate * 100:.0f}%）：{fail_line}",
     )
 
 
@@ -685,9 +717,7 @@ async def job_hop(db, gid, uid, nickname, cfg):
         )
     cur_id = int(p["company"])
     pool = await hiring_pool(db, gid)
-    eligible = [
-        c for c in pool if c["min_exp"] <= int(p["exp"]) and c["id"] != cur_id
-    ]
+    eligible = [c for c in pool if c["min_exp"] <= int(p["exp"]) and c["id"] != cur_id]
     if not eligible:
         return R(
             err="你的经验已经登顶所有公司，没有更好的去处了（宇宙大厂在向你招手？）"
@@ -703,16 +733,17 @@ async def job_hop(db, gid, uid, nickname, cfg):
     if random.random() > float(logic.cfg_get(cfg, "job_hop_success_rate", 0.75)):
         logic.cd_set(p, cd_key, hop_cd)
         await asyncio.to_thread(db.save_player, p)
+        fail_line = logic.pick(gd.t("work", "hop_fail"))
         return R(
             tmpl="panel",
             data={
                 "icon": "🙃",
                 "title": "跳槽失败",
                 "accent": "#fc6262",
-                "lines": [logic.pick(gd.t("work", "hop_fail"))],
+                "lines": [fail_line],
                 "foot": "一小时后可再次尝试，驴还得继续骑",
             },
-            text=f"跳槽失败：{logic.pick(gd.t('work', 'hop_fail'))}",
+            text=f"跳槽失败：{fail_line}",
         )
 
     old_comp_obj = await asyncio.to_thread(_resolve_company, cur_id, db)
@@ -766,7 +797,11 @@ async def write_report(db, gid, uid, nickname, cfg):
         float(p["salary"])
         / logic.workdays(cfg)
         * float(logic.cfg_get(cfg, "report_bonus_rate", 0.3))
-        * (2.0 if bonus_rate > s_threshold else 1.0),
+        * (
+            float(logic.cfg_get(cfg, "report_s_bonus_multi", 2.0))
+            if bonus_rate > s_threshold
+            else 1.0
+        ),
         2,
     )
     caught = random.random() < float(logic.cfg_get(cfg, "report_fail_rate", 0.12))
@@ -834,14 +869,18 @@ async def take_comp_leave(db, gid, uid, nickname, cfg):
     p["fund_savings"] = round(float(p.get("fund_savings") or 0) + insurance, 2)
     p["cash"] = round(float(p["cash"]) + net_pay, 2)
     p["total_earned"] = round(float(p.get("total_earned") or 0) + pay, 2)
-    p["mind"] = round(float(p["mind"]) + 15, 1)
-    p["health"] = round(float(p["health"]) + 8, 1)
+    mind_gain = float(logic.cfg_get(cfg, "leave_mind_gain", 15))
+    health_gain = float(logic.cfg_get(cfg, "leave_health_gain", 8))
+    p["mind"] = round(float(p["mind"]) + mind_gain, 1)
+    p["health"] = round(float(p["health"]) + health_gain, 1)
     p["work_day"] = today
     logic.clamp_status(p)
     await asyncio.to_thread(db.save_player, p)
     await asyncio.to_thread(
         db.add_transaction, gid, uid, "带薪调休", net_pay, "用调休券休息一天，工资照发"
     )
+    mg = int(mind_gain) if mind_gain == int(mind_gain) else mind_gain
+    hg = int(health_gain) if health_gain == int(health_gain) else health_gain
     return R(
         tmpl="panel",
         data={
@@ -852,8 +891,8 @@ async def take_comp_leave(db, gid, uid, nickname, cfg):
             "blocks": [
                 {"label": "今日到账", "value": f"+{logic.fmt_money(net_pay)} 元"},
                 {"label": "剩余调休券", "value": f"{p['comp_leave']} 张"},
-                {"label": "精神", "value": f"+15（当前 {p['mind']}）"},
-                {"label": "健康", "value": f"+8（当前 {p['health']}）"},
+                {"label": "精神", "value": f"+{mg}（当前 {p['mind']}）"},
+                {"label": "健康", "value": f"+{hg}（当前 {p['health']}）"},
             ],
         },
         text=f"带薪调休成功！到账 {logic.fmt_money(net_pay)} 元，剩余调休券 {p['comp_leave']} 张",
@@ -1004,7 +1043,7 @@ async def my_company(db, gid, uid, nickname, cfg):
         },
         {
             "label": "工作强度",
-            "value": f"每日健康 -{round(comp['intensity'] * 0.4, 1)}",
+            "value": f"每日健康 -{round(comp['intensity'] * float(logic.cfg_get(cfg, 'work_intensity_health_factor', 0.4)), 1)}",
         },
         {"label": "裁员风险", "value": f"{comp['risk'] * 100:.1f}%/天"},
         {"label": "连续出勤", "value": f"{p['attend_streak']} 天（有全勤加成）"},
@@ -1037,7 +1076,6 @@ async def my_company(db, gid, uid, nickname, cfg):
     )
 
 
-
 async def create_company(db, gid, uid, nickname, comp_name, cfg):
     """创业自建公司：身价达标且消耗启动资金。"""
     p = await logic.load_player(db, gid, uid, nickname, cfg)
@@ -1052,7 +1090,9 @@ async def create_company(db, gid, uid, nickname, comp_name, cfg):
     row = await asyncio.to_thread(db.get_custom_company_by_boss, gid, uid)
 
     if row:
-        return R(err=f"你已经创立了公司「{row['name']}」，当老板要有定力！发送「公司分红」领取利润")
+        return R(
+            err=f"你已经创立了公司「{row['name']}」，当老板要有定力！发送「公司分红」领取利润"
+        )
 
     # 门槛：职级 >= 10 (VP/合伙人) 或 身价 >= min_val，且启动资金 cost 元
     cost = float(logic.cfg_get(cfg, "create_company_cost", 30000.0))
@@ -1062,9 +1102,13 @@ async def create_company(db, gid, uid, nickname, comp_name, cfg):
     init_balance = float(logic.cfg_get(cfg, "custom_company_init_balance", 10000.0))
     value_bonus = float(logic.cfg_get(cfg, "create_company_value_bonus", 20000.0))
     if int(p["lvl"]) < min_lvl and float(p["value"]) < min_val:
-        return R(err=f"创业门槛极高！需要职级达到 VP/合伙人，或职场身价超过 {logic.fmt_money(min_val)} 元，打铁还需自身硬！")
+        return R(
+            err=f"创业门槛极高！需要职级达到 VP/合伙人，或职场身价超过 {logic.fmt_money(min_val)} 元，打铁还需自身硬！"
+        )
     if float(p["cash"]) < cost:
-        return R(err=f"注册公司需要 {logic.fmt_money(cost)} 元启动验资资金，当前现金不足")
+        return R(
+            err=f"注册公司需要 {logic.fmt_money(cost)} 元启动验资资金，当前现金不足"
+        )
 
     # 先建公司再扣钱：注册失败就没有钱可退，也不会留下「已扣款但无公司」的中间态。
     # create_custom_company_if_free 自带「一人一司」竞态保护。
@@ -1084,7 +1128,9 @@ async def create_company(db, gid, uid, nickname, comp_name, cfg):
     ok = await asyncio.to_thread(db.try_debit_cash, gid, uid, cost)
     if not ok:
         await asyncio.to_thread(db.delete_custom_company, cid)
-        return R(err=f"注册公司需要 {logic.fmt_money(cost)} 元启动验资资金，当前现金不足")
+        return R(
+            err=f"注册公司需要 {logic.fmt_money(cost)} 元启动验资资金，当前现金不足"
+        )
     await asyncio.to_thread(
         db.add_transaction, gid, uid, "创业注册资金", -cost, f"创立公司 {comp_name}"
     )
@@ -1099,7 +1145,11 @@ async def create_company(db, gid, uid, nickname, comp_name, cfg):
     await asyncio.to_thread(db.save_player, p)
 
     await asyncio.to_thread(
-        db.add_event, gid, uid, "创业", f"{p['nickname'] or uid} 豪掷千金创立了「{comp_name}」，正式晋升为资本家/大老板！"
+        db.add_event,
+        gid,
+        uid,
+        "创业",
+        f"{p['nickname'] or uid} 豪掷千金创立了「{comp_name}」，正式晋升为资本家/大老板！",
     )
     return R(
         tmpl="panel",
@@ -1129,7 +1179,6 @@ async def create_company(db, gid, uid, nickname, comp_name, cfg):
 
 async def company_dividend(db, gid, uid, nickname, cfg):
     """老板提取公司利润分红。"""
-    p = await logic.load_player(db, gid, uid, nickname, cfg)
     row_data, dividend, status = await asyncio.to_thread(
         db.withdraw_custom_company_dividend, str(gid), str(uid)
     )
@@ -1141,7 +1190,9 @@ async def company_dividend(db, gid, uid, nickname, cfg):
     # 金库已在库内原子清零，入账必须同样走原子列更新：
     # 若这里改走「快照 + 全列覆盖」，一旦写回丢失，钱就凭空消失且无法追回。
     await asyncio.to_thread(db.credit_income, gid, uid, float(dividend))
-    await asyncio.to_thread(db.add_transaction, gid, uid, "企业分红", dividend, f"来自 {row_data['name']}")
+    await asyncio.to_thread(
+        db.add_transaction, gid, uid, "企业分红", dividend, f"来自 {row_data['name']}"
+    )
     p = await asyncio.to_thread(db.get_player, gid, uid)
 
     return R(
@@ -1150,7 +1201,9 @@ async def company_dividend(db, gid, uid, nickname, cfg):
             "icon": "💰",
             "title": f"企业分红到账 · {row_data['name']}",
             "accent": "#6fe08c",
-            "lines": [f"公司运营良好，本次分红 {logic.fmt_money(dividend)} 元已存入个人现金！"],
+            "lines": [
+                f"公司运营良好，本次分红 {logic.fmt_money(dividend)} 元已存入个人现金！"
+            ],
             "blocks": [
                 {"label": "分红金额", "value": f"+{logic.fmt_money(dividend)} 元"},
                 {"label": "当前现金", "value": f"{logic.fmt_money(p['cash'])} 元"},
@@ -1160,5 +1213,3 @@ async def company_dividend(db, gid, uid, nickname, cfg):
         },
         text=f"💰 公司分红成功！已提现 {logic.fmt_money(dividend)} 元至个人现金！",
     )
-
-

@@ -52,7 +52,7 @@ except ImportError:  # 兼容以文件方式直接加载的旧版内核
     from webui.server import WebUIServer
 
 PLUGIN_NAME = "astrbot_plugin_shangbanzu"
-VERSION = "1.0.2"
+VERSION = "1.0.1"
 
 
 def _fmt_draw_lines(result: dict) -> list:
@@ -91,9 +91,13 @@ class Shangbanzu(Star):
             self._data_dir() / "screenshots",
             scale=float(logic.cfg_get(self.config, "render_scale", 2.0)),
             logger=logger,
-            max_concurrency=int(logic.cfg_get(self.config, "render_max_concurrency", 3)),
+            max_concurrency=int(
+                logic.cfg_get(self.config, "render_max_concurrency", 3)
+            ),
             max_keep=int(logic.cfg_get(self.config, "screenshot_max_keep", 60)),
-            viewport_width=int(logic.cfg_get(self.config, "render_viewport_width", 780)),
+            viewport_width=int(
+                logic.cfg_get(self.config, "render_viewport_width", 780)
+            ),
             timeout_ms=int(logic.cfg_get(self.config, "render_timeout_ms", 15000)),
         )
         self.market = StockMarket(self.db, self.config)
@@ -242,6 +246,10 @@ class Shangbanzu(Star):
             await self.renderer.close()
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[上班族物语] 渲染器关闭异常（已忽略）：{e}")
+        try:
+            await asyncio.to_thread(self.db.close)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[上班族物语] DB WAL checkpoint 异常（已忽略）：{e}")
 
     async def _push_loop(self):
         """定时任务：到点后向开启推送的群发送每日早报，并做每周排行归档。"""
@@ -299,16 +307,15 @@ class Shangbanzu(Star):
         lines = [f"📰 今日职场早报：{gd.news_of_day() or '暂无'}"]
         try:
             stocks = self.market.list_stocks(100)
-            ups = sorted(
-                (s for s in stocks if s["chg"] > 0), key=lambda s: -s["chg"]
-            )[:3]
-            downs = sorted(
-                (s for s in stocks if s["chg"] < 0), key=lambda s: s["chg"]
-            )[:3]
+            ups = sorted((s for s in stocks if s["chg"] > 0), key=lambda s: -s["chg"])[
+                :3
+            ]
+            downs = sorted((s for s in stocks if s["chg"] < 0), key=lambda s: s["chg"])[
+                :3
+            ]
             if ups:
                 lines.append(
-                    "📈 领涨："
-                    + " ".join(f"{s['name']} +{s['chg']}%" for s in ups)
+                    "📈 领涨：" + " ".join(f"{s['name']} +{s['chg']}%" for s in ups)
                 )
             if downs:
                 lines.append(
@@ -343,7 +350,7 @@ class Shangbanzu(Star):
 
         number = random_number()
         result = await asyncio.to_thread(
-            self.db.lottery_settle, today, number, make_judge(number)
+            self.db.lottery_settle, today, number, make_judge(number, self.config)
         )
         if not result:
             return
@@ -376,7 +383,9 @@ class Shangbanzu(Star):
             prev = (y, w - 1)
         else:
             # 动态计算上一年最后一天的 ISO 周数（可能为 52 或 53）
-            prev_y, prev_w = logic.iso_week(time.mktime((y - 1, 12, 31, 12, 0, 0, 0, 0, -1)))
+            prev_y, prev_w = logic.iso_week(
+                time.mktime((y - 1, 12, 31, 12, 0, 0, 0, 0, -1))
+            )
             prev = (prev_y, prev_w)
         if self.db.max_archived_week() == prev:
             return
@@ -421,7 +430,9 @@ class Shangbanzu(Star):
             data.setdefault("astrbot_version", AB_VER)
             tmpl_path = gd.template_path(template)
             tmpl_str = await asyncio.to_thread(tmpl_path.read_text, "utf-8")
-            html = await asyncio.to_thread(self.renderer.render_template, tmpl_str, data)
+            html = await asyncio.to_thread(
+                self.renderer.render_template, tmpl_str, data
+            )
             return await self.renderer.screenshot(
                 html, name=f"{template}_{int(time.time())}"
             )

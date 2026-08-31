@@ -190,6 +190,8 @@ class PlaywrightRenderer:
 
     async def close(self):
         """幂等关闭。先挡住新任务，再等在飞的截图收尾，避免关到一半被用。"""
+        if self._closing and self._browser is None:
+            return
         self._closing = True
         for _ in range(self.max_concurrency):
             try:
@@ -198,7 +200,10 @@ class PlaywrightRenderer:
                 break
         browser, pw = self._browser, self._pw
         self._browser = self._pw = None
-        for label, obj, coro_name in (("browser", browser, "close"), ("playwright", pw, "stop")):
+        for label, obj, coro_name in (
+            ("browser", browser, "close"),
+            ("playwright", pw, "stop"),
+        ):
             if obj is None:
                 continue
             try:

@@ -35,19 +35,65 @@ async def annual_review(db, gid, uid, nickname, cfg):
         + social * c("review_weight_social", 3)
         + lvl * c("review_weight_level", 50)
     )
-    score = round(score * (0.8 + random.random() * 0.4))
+    score = round(
+        score
+        * (
+            c("review_score_rand_min", 0.8)
+            + random.random() * c("review_score_rand_range", 0.4)
+        )
+    )
 
     # 档位阈值 + 年终奖倍数 + 调薪幅度。这是全插件最大的通胀杠杆
     # （S 级一次给数倍月薪现金 **且永久涨薪**），必须让运维能压制。
     tiers = [
-        ("S", "传奇打工者", "review_grade_s_threshold", 800,
-         "review_bonus_multi_s", 3.0, "review_raise_s", 0.15, "#ffd86f", "👑"),
-        ("A", "优秀员工", "review_grade_a_threshold", 500,
-         "review_bonus_multi_a", 2.0, "review_raise_a", 0.10, "#6fe08c", "🌟"),
-        ("B", "合格员工", "review_grade_b_threshold", 300,
-         "review_bonus_multi_b", 1.0, "review_raise_b", 0.05, "#7fd1ff", "📋"),
-        ("C", "待改进", "review_grade_c_threshold", 150,
-         "review_bonus_multi_c", 0.3, "review_raise_c", 0.0, "#ffb86f", "⚠️"),
+        (
+            "S",
+            "传奇打工者",
+            "review_grade_s_threshold",
+            800,
+            "review_bonus_multi_s",
+            3.0,
+            "review_raise_s",
+            0.15,
+            "#ffd86f",
+            "👑",
+        ),
+        (
+            "A",
+            "优秀员工",
+            "review_grade_a_threshold",
+            500,
+            "review_bonus_multi_a",
+            2.0,
+            "review_raise_a",
+            0.10,
+            "#6fe08c",
+            "🌟",
+        ),
+        (
+            "B",
+            "合格员工",
+            "review_grade_b_threshold",
+            300,
+            "review_bonus_multi_b",
+            1.0,
+            "review_raise_b",
+            0.05,
+            "#7fd1ff",
+            "📋",
+        ),
+        (
+            "C",
+            "待改进",
+            "review_grade_c_threshold",
+            150,
+            "review_bonus_multi_c",
+            0.3,
+            "review_raise_c",
+            0.0,
+            "#ffb86f",
+            "⚠️",
+        ),
     ]
     grade, grade_name = "D", "绩效不达标"
     bonus_mult = c("review_bonus_multi_d", 0.0)

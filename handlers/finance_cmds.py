@@ -79,8 +79,9 @@ async def transfer(ctx, event):
     ats = ctx.ats(event)
     if not ats:
         return R(err="请@收款人，如：转账 500 @群友")
-    # 有 @ 时先剔除收款人 QQ，避免适配器把 @ 渲染成数字文本后金额误取为 QQ 号
-    amount = ctx.amount_after(event, ("转账",), (ats[0],))
+    # 有 @ 时先剔除所有收款人 QQ，避免适配器把 @ 渲染成数字文本后金额误取为 QQ 号
+    # （多 @ 场景下第二个 @ 的 QQ 也会被当数字扫进 nums，必须一并剔除）
+    amount = ctx.amount_after(event, ("转账",), ats)
     return await finance.transfer(
         ctx.db,
         gid,

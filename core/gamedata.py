@@ -40,15 +40,15 @@ def load_all(force: bool = False) -> dict:
 def companies() -> list[dict]:
     """在招公司列表。
 
-    返回浅拷贝：调用方对列表做 sort/append 不会污染全进程共享的缓存。
+    返回浅拷贝 + 逐项 dict 拷贝：调用方修改列表或内部字典都不会污染缓存。
     """
-    return list(load_all()["companies"]["companies"])
+    return [dict(c) for c in load_all()["companies"]["companies"]]
 
 
 def company_by_id(cid: int) -> dict | None:
     for c in load_all()["companies"]["companies"]:
         if c["id"] == cid:
-            return c
+            return dict(c)
     return None
 
 
@@ -132,7 +132,9 @@ def display_company(cid, names: dict[int, str], jobless: str = "无业") -> str:
 
 
 def positions() -> list[dict]:
-    return sorted(load_all()["positions"]["positions"], key=lambda x: x["i"])
+    return sorted(
+        [dict(p) for p in load_all()["positions"]["positions"]], key=lambda x: x["i"]
+    )
 
 
 def position(i: int) -> dict:
@@ -142,7 +144,9 @@ def position(i: int) -> dict:
 
 
 def houses() -> list[dict]:
-    return sorted(load_all()["houses"]["houses"], key=lambda x: x["i"])
+    return sorted(
+        [dict(h) for h in load_all()["houses"]["houses"]], key=lambda x: x["i"]
+    )
 
 
 def house(i: int) -> dict:
@@ -172,10 +176,10 @@ def certs() -> dict[str, dict]:
     return {str(c["name"]): dict(c) for c in load_all()["certs"]["certs"]}
 
 
-
 def skills() -> dict[str, dict]:
     """{技能名：{cost, exp}}（resources/data/skills.json）。"""
     return {str(s["name"]): dict(s) for s in load_all()["skills"]["skills"]}
+
 
 def scratch_table() -> tuple[list[dict], dict]:
     """刮刮乐奖项表 (中奖档位列表, 未中奖档位)。
@@ -188,23 +192,16 @@ def scratch_table() -> tuple[list[dict], dict]:
 
 
 def shop_items() -> list[dict]:
-    return list(load_all()["shop"]["shop"])
+    return [dict(s) for s in load_all()["shop"]["shop"]]
 
 
 def opponents() -> list[dict]:
-    """卷王大赛对手池（resources/data/opponents.json）。
-
-    别名 opponent_pool 是历史命名，统一使用 opponents()。
-    """
-    return list(load_all()["opponents"]["opponents"])
-
-
-# 兼容旧调用点
-opponent_pool = opponents
+    """卷王大赛对手池（resources/data/opponents.json）。"""
+    return [dict(o) for o in load_all()["opponents"]["opponents"]]
 
 
 def rank_events() -> list[dict]:
-    return list(load_all()["rankevents"]["events"])
+    return [dict(e) for e in load_all()["rankevents"]["events"]]
 
 
 def side_hustle_titles() -> list[str]:
@@ -218,13 +215,15 @@ def side_hustle_titles() -> list[str]:
 
 def workstations() -> list[dict]:
     """工位配置（resources/data/workstations.json 中的 workstations）。"""
-    return list(load_all().get("workstations", {}).get("workstations", []))
+    return [dict(w) for w in load_all().get("workstations", {}).get("workstations", [])]
 
 
 def match_opponent(score: int) -> dict:
     pool = load_all()["opponents"]["opponents"]
     near = [o for o in pool if abs(o["score"] - int(score)) <= 300]
-    return random.choice(near or pool)
+    if not near and not pool:
+        return {"name": "神秘选手", "score": int(score), "avatar": "🙂"}
+    return dict(random.choice(near or pool))
 
 
 def news_of_day() -> str:
